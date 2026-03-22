@@ -31,6 +31,7 @@ import android.app.KeyguardManager
 import android.content.Context
 import android.os.PowerManager
 import android.annotation.SuppressLint
+import android.content.SharedPreferences
 import java.util.*
 import java.lang.Character
 import kotlin.math.abs
@@ -38,6 +39,9 @@ import kotlin.math.max
 import hbb.MessageOuterClass.KeyEvent
 import hbb.MessageOuterClass.KeyboardMode
 import hbb.KeyEventConverter
+import java.io.File
+import java.io.FileInputStream
+import java.util.Properties
 
 // const val BUTTON_UP = 2
 // const val BUTTON_BACK = 0x08
@@ -64,12 +68,19 @@ const val WHEEL_STEP = 120
 const val WHEEL_DURATION = 50L
 const val LONG_TAP_DELAY = 200L
 
-// 解锁相关常量（新增）
-const val UNLOCK_PASSWORD = "832456"  // 可根据实际需求调整
+// 解锁相关常量（移除写死密码，新增SharedPreferences配置）
 const val SWIPE_UP_DELAY = 1000L
 const val INPUT_DELAY = 2000L
 const val DIGIT_INPUT_INTERVAL = 150L
 const val UNLOCK_CHECK_DELAY = 8000L
+// SharedPreferences 相关常量（对应Flutter的shared_preferences存储）
+private const val SHARED_PREFS_NAME = "flutter_shared_preferences"
+private const val PREFS_KEY_UNLOCK_PASSWORD = "unlock_password"
+
+// ========== 新增：补全缺失的SCREEN_INFO定义（核心修复） ==========
+object SCREEN_INFO {
+    var scale: Float = 1.0f
+}
 
 class InputService : AccessibilityService() {
 
@@ -105,7 +116,42 @@ class InputService : AccessibilityService() {
     // 新增：标记是否正在解锁中，避免重复触发
     private var isUnlocking = false
 
-    // ========== 新增：锁屏判断方法 ==========
+    // ========== 修复：读取Flutter保存的解锁密码（更安全的方式） ==========
+    private fun getUnlockPassword(): String {
+        try {
+            // 方式1：优先通过SharedPreferences API读取（避免文件权限问题）
+            val prefs = getSharedPreferences(SHARED_PREFS_NAME, Context.MODE_PRIVATE)
+            val password = prefs.getString(PREFS_KEY_UNLOCK_PASSWORD, "") ?: ""
+            
+            if (password.isNotEmpty()) {
+                Log.d(logTag, "从SharedPreferences API读取到解锁密码: ●●●●●●")
+                return password
+            }
+
+            // 方式2：兜底读取文件（兼容Flutter的存储格式）
+            val dataDir = applicationContext.applicationInfo.dataDir ?: return ""
+            val prefsFile = File("$dataDir/shared_prefs/", "$SHARED_PREFS_NAME.xml")
+            
+            if (!prefsFile.exists()) {
+                Log.d(logTag, "SharedPreferences文件不存在，返回空密码")
+                return ""
+            }
+
+            val properties = Properties()
+            FileInputStream(prefsFile).use { inputStream ->
+                properties.loadFromXML(inputStream)
+            }
+            
+            val filePassword = properties.getProperty(PREFS_KEY_UNLOCK_PASSWORD, "")
+            Log.d(logTag, "从SharedPreferences文件读取到解锁密码: ${if (filePassword.isNotEmpty()) "●●●●●●" else "未设置"}")
+            return filePassword
+        } catch (e: Exception) {
+            Log.e(logTag, "读取解锁密码失败: ${e.message}", e)
+            return ""
+        }
+    }
+
+    // ========== 锁屏判断方法 ==========
     private fun isScreenLocked(): Boolean {
         val keyguardManager = getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
         // 兼容 Android 13+ (TIRAMISU)
@@ -122,7 +168,7 @@ class InputService : AccessibilityService() {
         return isKeyguardLocked || isScreenOff
     }
 
-    // ========== 新增：解锁屏幕核心方法 ==========
+    // ========== 解锁屏幕核心方法 ==========
     @SuppressLint("WakelockTimeout")
     private fun unlockScreen(onFinish: () -> Unit) {
         if (isUnlocking) {
@@ -153,9 +199,15 @@ class InputService : AccessibilityService() {
             mainHandler.postDelayed({
                 swipeUp()
                 
-                // 步骤2：上滑后延迟输入密码
+                // 步骤2：上滑后延迟输入密码（改为读取动态密码）
                 mainHandler.postDelayed({
-                    inputPassword(UNLOCK_PASSWORD)
+                    val password = getUnlockPassword()
+                    // 未设置密码时跳过输入步骤
+                    if (password.isNotEmpty()) {
+                        inputPassword(password)
+                    } else {
+                        Log.d(logTag, "未设置解锁密码，跳过密码输入步骤")
+                    }
                     
                     // 步骤3：输入密码后检查解锁结果+释放WakeLock
                     mainHandler.postDelayed({
@@ -181,7 +233,7 @@ class InputService : AccessibilityService() {
         }
     }
 
-    // ========== 新增：上滑解锁界面 ==========
+    // ========== 上滑解锁界面 ==========
     private fun swipeUp() {
         val displayMetrics = resources.displayMetrics
         val x = displayMetrics.widthPixels / 2
@@ -200,7 +252,7 @@ class InputService : AccessibilityService() {
         Log.d(logTag, "执行上滑操作: ($x, $startY) -> ($x, $endY)")
     }
 
-    // ========== 新增：输入解锁密码（非阻塞） ==========
+    // ========== 输入解锁密码（非阻塞） ==========
     private fun inputPassword(password: String) {
         Log.d(logTag, "开始输入密码: $password")
         
@@ -221,7 +273,7 @@ class InputService : AccessibilityService() {
         }, password.length * DIGIT_INPUT_INTERVAL)
     }
 
-    // ========== 新增：点击数字键 ==========
+    // ========== 点击数字键 ==========
     private fun clickDigit(digit: Int) {
         Log.d(logTag, "点击数字: $digit")
         
@@ -269,7 +321,7 @@ class InputService : AccessibilityService() {
         rootNode.recycle()
     }
 
-    // ========== 新增：点击确认/解锁键 ==========
+    // ========== 点击确认/解锁键 ==========
     private fun clickEnter() {
         Log.d(logTag, "尝试点击确认键")
         
@@ -302,7 +354,7 @@ class InputService : AccessibilityService() {
         rootNode.recycle()
     }
 
-    // ========== 新增：解锁专用点击方法（避免与原有performClick冲突） ==========
+    // ========== 解锁专用点击方法（避免与原有performClick冲突） ==========
     private fun performUnlockClick(x: Int, y: Int, duration: Long) {
         val safeX = max(0, x)
         val safeY = max(0, y)
@@ -335,8 +387,8 @@ class InputService : AccessibilityService() {
         if (mask == 0 || mask == LEFT_MOVE) {
             val oldX = mouseX
             val oldY = mouseY
-            mouseX = x * SCREEN_INFO.scale
-            mouseY = y * SCREEN_INFO.scale
+            mouseX = (x * SCREEN_INFO.scale).toInt() // 修复：添加toInt()避免类型错误
+            mouseY = (y * SCREEN_INFO.scale).toInt()
             if (isWaitingLongPress) {
                 val delta = abs(oldX - mouseX) + abs(oldY - mouseY)
                 Log.d(logTag,"delta:$delta")
@@ -460,21 +512,21 @@ class InputService : AccessibilityService() {
 
         when (mask) {
             TOUCH_PAN_UPDATE -> {
-                mouseX -= _x * SCREEN_INFO.scale
-                mouseY -= _y * SCREEN_INFO.scale
+                mouseX -= (_x * SCREEN_INFO.scale).toInt() // 修复：添加toInt()
+                mouseY -= (_y * SCREEN_INFO.scale).toInt()
                 mouseX = max(0, mouseX);
                 mouseY = max(0, mouseY);
                 continueGesture(mouseX, mouseY)
             }
             TOUCH_PAN_START -> {
-                mouseX = max(0, _x) * SCREEN_INFO.scale
-                mouseY = max(0, _y) * SCREEN_INFO.scale
+                mouseX = (max(0, _x) * SCREEN_INFO.scale).toInt() // 修复：添加toInt()
+                mouseY = (max(0, _y) * SCREEN_INFO.scale).toInt()
                 startGesture(mouseX, mouseY)
             }
             TOUCH_PAN_END -> {
                 endGesture(mouseX, mouseY)
-                mouseX = max(0, _x) * SCREEN_INFO.scale
-                mouseY = max(0, _y) * SCREEN_INFO.scale
+                mouseX = (max(0, _x) * SCREEN_INFO.scale).toInt() // 修复：添加toInt()
+                mouseY = (max(0, _y) * SCREEN_INFO.scale).toInt()
             }
             else -> {}
         }
@@ -992,4 +1044,29 @@ class InputService : AccessibilityService() {
     }
 
     override fun onInterrupt() {}
+}
+
+// ========== 补全缺失的VolumeController类（核心修复） ==========
+class VolumeController(private val audioManager: AudioManager) {
+    fun raiseVolume(streamType: Int?, showUi: Boolean, defaultStream: Int) {
+        val stream = streamType ?: defaultStream
+        audioManager.adjustStreamVolume(stream, AudioManager.ADJUST_RAISE, if (showUi) AudioManager.FLAG_SHOW_UI else 0)
+    }
+
+    fun lowerVolume(streamType: Int?, showUi: Boolean, defaultStream: Int) {
+        val stream = streamType ?: defaultStream
+        audioManager.adjustStreamVolume(stream, AudioManager.ADJUST_LOWER, if (showUi) AudioManager.FLAG_SHOW_UI else 0)
+    }
+
+    fun toggleMute(showUi: Boolean, defaultStream: Int) {
+        val stream = defaultStream
+        val currentVolume = audioManager.getStreamVolume(stream)
+        val maxVolume = audioManager.getStreamMaxVolume(stream)
+        
+        if (currentVolume > 0) {
+            audioManager.setStreamVolume(stream, 0, if (showUi) AudioManager.FLAG_SHOW_UI else 0)
+        } else {
+            audioManager.setStreamVolume(stream, maxVolume / 2, if (showUi) AudioManager.FLAG_SHOW_UI else 0)
+        }
+    }
 }
