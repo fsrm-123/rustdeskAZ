@@ -43,14 +43,10 @@ import java.io.File
 import java.io.FileInputStream
 import java.util.Properties
 
-// const val BUTTON_UP = 2
-// const val BUTTON_BACK = 0x08
-
 const val LEFT_DOWN = 9
 const val LEFT_MOVE = 8
 const val LEFT_UP = 10
 const val RIGHT_UP = 18
-// (BUTTON_BACK << 3) | BUTTON_UP
 const val BACK_UP = 66
 const val WHEEL_BUTTON_DOWN = 33
 const val WHEEL_BUTTON_UP = 34
@@ -68,19 +64,17 @@ const val WHEEL_STEP = 120
 const val WHEEL_DURATION = 50L
 const val LONG_TAP_DELAY = 200L
 
-// 解锁相关常量（移除写死密码，新增SharedPreferences配置）
 const val SWIPE_UP_DELAY = 1000L
 const val INPUT_DELAY = 2000L
 const val DIGIT_INPUT_INTERVAL = 150L
 const val UNLOCK_CHECK_DELAY = 8000L
-// SharedPreferences 相关常量（对应Flutter的shared_preferences存储）
+
 private const val SHARED_PREFS_NAME = "flutter_shared_preferences"
 private const val PREFS_KEY_UNLOCK_PASSWORD = "unlock_password"
 
-// ========== 修复：重命名SCREEN_INFO为INPUT_SCREEN_INFO避免重复定义 ==========
-object INPUT_SCREEN_INFO {
-    var scale: Float = 1.0f
-}
+// ========== 修复：使用object声明，与common.kt保持一致，避免重复定义 ==========
+// 删除这里的重复定义，改为引用common.kt中的COMMON_SCREEN_INFO
+// 或者如果确实需要不同的实例，使用不同的名称如INPUT_SCREEN_INFO
 
 class InputService : AccessibilityService() {
 
@@ -99,7 +93,6 @@ class InputService : AccessibilityService() {
     private var mouseY = 0
     private var timer = Timer()
     private var recentActionTask: TimerTask? = null
-    // 100(tap timeout) + 400(long press timeout)
     private val longPressDuration = ViewConfiguration.getTapTimeout().toLong() + ViewConfiguration.getLongPressTimeout().toLong()
 
     private val wheelActionsQueue = LinkedList<GestureDescription>()
@@ -111,15 +104,15 @@ class InputService : AccessibilityService() {
     private var lastX = 0
     private var lastY = 0
 
-    private val volumeController: VolumeController by lazy { VolumeController(applicationContext.getSystemService(AUDIO_SERVICE) as AudioManager) }
+    // ========== 修复：使用导入的VolumeController，删除内部类定义 ==========
+    private val volumeController: VolumeController by lazy { 
+        VolumeController(applicationContext.getSystemService(AUDIO_SERVICE) as AudioManager) 
+    }
 
-    // 新增：标记是否正在解锁中，避免重复触发
     private var isUnlocking = false
 
-    // ========== 修复：读取Flutter保存的解锁密码（更安全的方式） ==========
     private fun getUnlockPassword(): String {
         try {
-            // 方式1：优先通过SharedPreferences API读取（避免文件权限问题）
             val prefs = getSharedPreferences(SHARED_PREFS_NAME, Context.MODE_PRIVATE)
             val password = prefs.getString(PREFS_KEY_UNLOCK_PASSWORD, "") ?: ""
             
@@ -128,7 +121,6 @@ class InputService : AccessibilityService() {
                 return password
             }
 
-            // 方式2：兜底读取文件（兼容Flutter的存储格式）
             val dataDir = applicationContext.applicationInfo.dataDir ?: return ""
             val prefsFile = File("$dataDir/shared_prefs/", "$SHARED_PREFS_NAME.xml")
             
@@ -151,24 +143,20 @@ class InputService : AccessibilityService() {
         }
     }
 
-    // ========== 锁屏判断方法 ==========
     private fun isScreenLocked(): Boolean {
         val keyguardManager = getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
-        // 兼容 Android 13+ (TIRAMISU)
         val isKeyguardLocked = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             keyguardManager.isDeviceLocked()
         } else {
             keyguardManager.isKeyguardLocked()
         }
         
-        // 补充判断屏幕是否休眠（黑屏）
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
         val isScreenOff = !powerManager.isInteractive
         
         return isKeyguardLocked || isScreenOff
     }
 
-    // ========== 解锁屏幕核心方法 ==========
     @SuppressLint("WakelockTimeout")
     private fun unlockScreen(onFinish: () -> Unit) {
         if (isUnlocking) {
@@ -182,7 +170,6 @@ class InputService : AccessibilityService() {
             val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
             val keyguardManager = getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
             
-            // 规范WakeLock标签（包名格式）
             val wakeLockTag = "${packageName}:InputServiceWakeLock"
             val wakeLock = powerManager.newWakeLock(
                 PowerManager.SCREEN_BRIGHT_WAKE_LOCK or
@@ -190,35 +177,28 @@ class InputService : AccessibilityService() {
                 PowerManager.ON_AFTER_RELEASE,
                 wakeLockTag
             )
-            wakeLock.acquire(15000) // 超时兜底释放
+            wakeLock.acquire(15000)
             
-            // 使用Handler实现非阻塞延迟
             val mainHandler = Handler(Looper.getMainLooper())
             
-            // 步骤1：亮屏后延迟上滑
             mainHandler.postDelayed({
                 swipeUp()
                 
-                // 步骤2：上滑后延迟输入密码（改为读取动态密码）
                 mainHandler.postDelayed({
                     val password = getUnlockPassword()
-                    // 未设置密码时跳过输入步骤
                     if (password.isNotEmpty()) {
                         inputPassword(password)
                     } else {
                         Log.d(logTag, "未设置解锁密码，跳过密码输入步骤")
                     }
                     
-                    // 步骤3：输入密码后检查解锁结果+释放WakeLock
                     mainHandler.postDelayed({
                         val locked = isScreenLocked()
                         Log.d(logTag, if (!locked) "屏幕解锁成功" else "屏幕解锁失败")
-                        // 显式释放WakeLock
                         if (wakeLock.isHeld) {
                             wakeLock.release()
                         }
                         isUnlocking = false
-                        // 解锁完成后执行原操作
                         onFinish()
                     }, UNLOCK_CHECK_DELAY)
                     
@@ -233,7 +213,6 @@ class InputService : AccessibilityService() {
         }
     }
 
-    // ========== 上滑解锁界面 ==========
     private fun swipeUp() {
         val displayMetrics = resources.displayMetrics
         val x = displayMetrics.widthPixels / 2
@@ -252,12 +231,10 @@ class InputService : AccessibilityService() {
         Log.d(logTag, "执行上滑操作: ($x, $startY) -> ($x, $endY)")
     }
 
-    // ========== 输入解锁密码（非阻塞） ==========
     private fun inputPassword(password: String) {
         Log.d(logTag, "开始输入密码: $password")
         
         val mainHandler = Handler(Looper.getMainLooper())
-        // 非阻塞间隔输入数字
         for (i in password.indices) {
             val char = password[i]
             mainHandler.postDelayed({
@@ -267,13 +244,11 @@ class InputService : AccessibilityService() {
             }, i * DIGIT_INPUT_INTERVAL)
         }
         
-        // 所有数字输入完成后点击确认键
         mainHandler.postDelayed({
             clickEnter()
         }, password.length * DIGIT_INPUT_INTERVAL)
     }
 
-    // ========== 点击数字键 ==========
     private fun clickDigit(digit: Int) {
         Log.d(logTag, "点击数字: $digit")
         
@@ -282,7 +257,6 @@ class InputService : AccessibilityService() {
             return
         }
         
-        // 尝试通过资源ID查找
         val possibleIds = arrayOf(
             "com.android.systemui:id/key$digit",
             "key$digit",
@@ -299,7 +273,6 @@ class InputService : AccessibilityService() {
             }
         }
         
-        // ID查找失败，尝试通过文本查找
         if (targetNode == null) {
             val nodes = rootNode.findAccessibilityNodeInfosByText(digit.toString())
             for (node in nodes) {
@@ -310,7 +283,6 @@ class InputService : AccessibilityService() {
             }
         }
         
-        // 执行点击（使用重命名后的方法避免冲突）
         targetNode?.let { node ->
             val bounds = Rect()
             node.getBoundsInScreen(bounds)
@@ -321,7 +293,6 @@ class InputService : AccessibilityService() {
         rootNode.recycle()
     }
 
-    // ========== 点击确认/解锁键 ==========
     private fun clickEnter() {
         Log.d(logTag, "尝试点击确认键")
         
@@ -330,7 +301,6 @@ class InputService : AccessibilityService() {
             return
         }
         
-        // 优先通过文本查找（兼容多语言/多厂商）
         val confirmTexts = arrayOf("确定", "确认", "OK", "完成", "解锁", "下一步")
         for (text in confirmTexts) {
             val nodes = rootNode.findAccessibilityNodeInfosByText(text)
@@ -346,7 +316,6 @@ class InputService : AccessibilityService() {
             }
         }
         
-        // 降级到坐标点击（兜底方案）
         val displayMetrics = resources.displayMetrics
         val x = displayMetrics.widthPixels - 100
         val y = displayMetrics.heightPixels - 200
@@ -354,7 +323,6 @@ class InputService : AccessibilityService() {
         rootNode.recycle()
     }
 
-    // ========== 解锁专用点击方法（避免与原有performClick冲突） ==========
     private fun performUnlockClick(x: Int, y: Int, duration: Long) {
         val safeX = max(0, x)
         val safeY = max(0, y)
@@ -372,7 +340,6 @@ class InputService : AccessibilityService() {
 
     @RequiresApi(Build.VERSION_CODES.N)
     fun onMouseInput(mask: Int, _x: Int, _y: Int) {
-        // 新增：鼠标输入前先判断锁屏状态，若锁屏则先解锁，解锁后再执行原操作
         if (isScreenLocked()) {
             Log.d(logTag, "屏幕已锁定，先执行解锁，解锁后再处理鼠标操作")
             unlockScreen {
@@ -384,11 +351,12 @@ class InputService : AccessibilityService() {
         val x = max(0, _x)
         val y = max(0, _y)
 
+        // ========== 修复：使用COMMON_SCREEN_INFO替代SCREEN_INFO ==========
         if (mask == 0 || mask == LEFT_MOVE) {
             val oldX = mouseX
             val oldY = mouseY
-            mouseX = (x * INPUT_SCREEN_INFO.scale).toInt() // 修复：引用重命名后的INPUT_SCREEN_INFO
-            mouseY = (y * INPUT_SCREEN_INFO.scale).toInt()
+            mouseX = (x * COMMON_SCREEN_INFO.scale).toInt()
+            mouseY = (y * COMMON_SCREEN_INFO.scale).toInt()
             if (isWaitingLongPress) {
                 val delta = abs(oldX - mouseX) + abs(oldY - mouseY)
                 Log.d(logTag,"delta:$delta")
@@ -398,7 +366,6 @@ class InputService : AccessibilityService() {
             }
         }
 
-        // left button down, was up
         if (mask == LEFT_DOWN) {
             isWaitingLongPress = true
             timer.schedule(object : TimerTask() {
@@ -415,12 +382,10 @@ class InputService : AccessibilityService() {
             return
         }
 
-        // left down, was down
         if (leftIsDown) {
             continueGesture(mouseX, mouseY)
         }
 
-        // left up, was down
         if (mask == LEFT_UP) {
             if (leftIsDown) {
                 leftIsDown = false
@@ -440,7 +405,6 @@ class InputService : AccessibilityService() {
             return
         }
 
-        // long WHEEL_BUTTON_DOWN -> GLOBAL_ACTION_RECENTS
         if (mask == WHEEL_BUTTON_DOWN) {
             timer.purge()
             recentActionTask = object : TimerTask() {
@@ -452,7 +416,6 @@ class InputService : AccessibilityService() {
             timer.schedule(recentActionTask, LONG_TAP_DELAY)
         }
 
-        // wheel button up
         if (mask == WHEEL_BUTTON_UP) {
             if (recentActionTask != null) {
                 recentActionTask!!.cancel()
@@ -501,7 +464,6 @@ class InputService : AccessibilityService() {
 
     @RequiresApi(Build.VERSION_CODES.N)
     fun onTouchInput(mask: Int, _x: Int, _y: Int) {
-        // 新增：触摸输入前先判断锁屏状态，若锁屏则先解锁，解锁后再执行原操作
         if (isScreenLocked()) {
             Log.d(logTag, "屏幕已锁定，先执行解锁，解锁后再处理触摸操作")
             unlockScreen {
@@ -512,21 +474,22 @@ class InputService : AccessibilityService() {
 
         when (mask) {
             TOUCH_PAN_UPDATE -> {
-                mouseX -= (_x * INPUT_SCREEN_INFO.scale).toInt() // 修复：引用重命名后的INPUT_SCREEN_INFO
-                mouseY -= (_y * INPUT_SCREEN_INFO.scale).toInt()
+                // ========== 修复：使用COMMON_SCREEN_INFO替代SCREEN_INFO ==========
+                mouseX -= (_x * COMMON_SCREEN_INFO.scale).toInt()
+                mouseY -= (_y * COMMON_SCREEN_INFO.scale).toInt()
                 mouseX = max(0, mouseX);
                 mouseY = max(0, mouseY);
                 continueGesture(mouseX, mouseY)
             }
             TOUCH_PAN_START -> {
-                mouseX = (max(0, _x) * INPUT_SCREEN_INFO.scale).toInt() // 修复：引用重命名后的INPUT_SCREEN_INFO
-                mouseY = (max(0, _y) * INPUT_SCREEN_INFO.scale).toInt()
+                mouseX = (max(0, _x) * COMMON_SCREEN_INFO.scale).toInt()
+                mouseY = (max(0, _y) * COMMON_SCREEN_INFO.scale).toInt()
                 startGesture(mouseX, mouseY)
             }
             TOUCH_PAN_END -> {
                 endGesture(mouseX, mouseY)
-                mouseX = (max(0, _x) * INPUT_SCREEN_INFO.scale).toInt() // 修复：引用重命名后的INPUT_SCREEN_INFO
-                mouseY = (max(0, _y) * INPUT_SCREEN_INFO.scale).toInt()
+                mouseX = (max(0, _x) * COMMON_SCREEN_INFO.scale).toInt()
+                mouseY = (max(0, _y) * COMMON_SCREEN_INFO.scale).toInt()
             }
             else -> {}
         }
@@ -681,7 +644,6 @@ class InputService : AccessibilityService() {
 
     @RequiresApi(Build.VERSION_CODES.N)
     fun onKeyEvent(data: ByteArray) {
-        // 新增：键盘输入前先判断锁屏状态，若锁屏则先解锁，解锁后再执行原操作
         if (isScreenLocked()) {
             Log.d(logTag, "屏幕已锁定，先执行解锁，解锁后再处理键盘操作")
             unlockScreen {
@@ -695,9 +657,6 @@ class InputService : AccessibilityService() {
 
         var textToCommit: String? = null
 
-        // [down] indicates the key's state(down or up).
-        // [press] indicates a click event(down and up).
-        // https://github.com/rustdesk/rustdesk/blob/3a7594755341f023f56fa4b6a43b60d6b47df88d/flutter/lib/models/input_model.dart#L688
         if (keyEvent.hasSeq()) {
             textToCommit = keyEvent.getSeq()
         } else if (keyboardMode == KeyboardMode.Legacy) {
@@ -792,7 +751,6 @@ class InputService : AccessibilityService() {
 
     private fun tryHandlePowerKeyEvent(event: KeyEventAndroid): Boolean {
         if (event.keyCode == KeyEventAndroid.KEYCODE_POWER) {
-            // Perform power dialog action when action is up
             if (event.action == KeyEventAndroid.ACTION_UP) {
                 performGlobalAction(GLOBAL_ACTION_POWER_DIALOG);
             }
@@ -957,7 +915,6 @@ class InputService : AccessibilityService() {
             }
 
             this.fakeEditTextForTextStateCalculation?.let {
-                // This is essiential to make sure layout object is created. OnKeyDown may not work if layout is not created.
                 val rect = Rect()
                 node.getBoundsInScreen(rect)
 
@@ -1015,7 +972,6 @@ class InputService : AccessibilityService() {
         return success
     }
 
-
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
     }
 
@@ -1030,7 +986,6 @@ class InputService : AccessibilityService() {
         }
         setServiceInfo(info)
         fakeEditTextForTextStateCalculation = EditText(this)
-        // Size here doesn't matter, we won't show this view.
         fakeEditTextForTextStateCalculation?.layoutParams = LayoutParams(100, 100)
         fakeEditTextForTextStateCalculation?.onPreDraw()
         val layout = fakeEditTextForTextStateCalculation?.getLayout()
