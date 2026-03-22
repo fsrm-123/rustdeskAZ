@@ -17,6 +17,7 @@ import '../../common/widgets/login.dart';
 import '../../consts.dart';
 import '../../models/model.dart';
 import '../../models/platform_model.dart';
+import '../../models/server_model.dart'; // 新增：导入ServerModel
 import '../widgets/dialog.dart';
 import 'home_page.dart';
 import 'scan_page.dart';
@@ -102,6 +103,11 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
   var _allowAskForNoteAtEndOfConnection = false;
   var _preventSleepWhileConnected = true;
 
+  // 新增：锁屏密码控制器
+  late TextEditingController _unlockPwdController;
+  // 新增：存储当前保存的锁屏密码
+  String _currentUnlockPwd = "";
+
   _SettingsState() {
     _enableAbr = option2bool(
         kOptionEnableAbr, bind.mainGetOptionSync(key: kOptionEnableAbr));
@@ -151,6 +157,11 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+
+    // 新增：初始化锁屏密码控制器
+    final serverModel = Provider.of<ServerModel>(context, listen: false);
+    _currentUnlockPwd = serverModel.unlockPassword;
+    _unlockPwdController = TextEditingController(text: _currentUnlockPwd);
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       var update = false;
@@ -231,6 +242,8 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    // 新增：释放锁屏密码控制器
+    _unlockPwdController.dispose();
     super.dispose();
   }
 
@@ -268,6 +281,22 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
     } else {
       return false;
     }
+  }
+
+  // 新增：保存锁屏密码方法
+  void _saveUnlockPassword() {
+    final newPwd = _unlockPwdController.text.trim();
+    if (newPwd.isEmpty) {
+      showToast(translate("Unlock password cannot be empty"));
+      return;
+    }
+    
+    final serverModel = Provider.of<ServerModel>(context, listen: false);
+    serverModel.saveUnlockPassword(newPwd);
+    setState(() {
+      _currentUnlockPwd = newPwd;
+    });
+    showToast(translate("Unlock password saved successfully"));
   }
 
   @override
@@ -521,6 +550,69 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
               },
       )
     ];
+
+    // 新增：锁屏密码设置项
+    final List<AbstractSettingsTile> unlockPasswordTiles = [
+      SettingsTile(
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(translate('Screen Unlock Password')),
+            Text(
+              _currentUnlockPwd.isNotEmpty 
+                  ? '●●●●●●●●' 
+                  : translate('Not set'),
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
+        ),
+        leading: Icon(Icons.lock_outline),
+        onPressed: (context) {
+          // 弹出密码输入对话框
+          gFFI.dialogManager.show((setState, close, ctx) {
+            return CustomAlertDialog(
+              title: Text(translate('Set Unlock Password')),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: _unlockPwdController,
+                    obscureText: true,
+                    decoration: InputDecoration(
+                      labelText: translate('Unlock Password'),
+                      hintText: translate('Enter your device unlock password'),
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: ElevatedButton(
+                          onPressed: () => close(),
+                          child: Text(translate('Cancel')),
+                        ),
+                      ),
+                      SizedBox(width: 10),
+                      Expanded(
+                        child: ElevatedButton(
+                          onPressed: () {
+                            _saveUnlockPassword();
+                            close();
+                          },
+                          child: Text(translate('Save')),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            );
+          });
+        },
+      ),
+    ];
+
     if (_hasIgnoreBattery) {
       enhancementsTiles.insert(
           0,
@@ -850,6 +942,9 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
                 });
               },
             ),
+          // 新增：添加锁屏密码设置项到设置列表
+          if (isAndroid && !disabledSettings)
+            ...unlockPasswordTiles,
         ]),
         if (isAndroid)
           SettingsSection(title: Text(translate('Hardware Codec')), tiles: [
