@@ -77,8 +77,8 @@ const val UNLOCK_CHECK_DELAY = 8000L
 private const val SHARED_PREFS_NAME = "flutter_shared_preferences"
 private const val PREFS_KEY_UNLOCK_PASSWORD = "unlock_password"
 
-// ========== 新增：补全缺失的SCREEN_INFO定义（核心修复） ==========
-object SCREEN_INFO {
+// ========== 修复：重命名SCREEN_INFO为INPUT_SCREEN_INFO避免重复定义 ==========
+object INPUT_SCREEN_INFO {
     var scale: Float = 1.0f
 }
 
@@ -387,8 +387,8 @@ class InputService : AccessibilityService() {
         if (mask == 0 || mask == LEFT_MOVE) {
             val oldX = mouseX
             val oldY = mouseY
-            mouseX = (x * SCREEN_INFO.scale).toInt() // 修复：添加toInt()避免类型错误
-            mouseY = (y * SCREEN_INFO.scale).toInt()
+            mouseX = (x * INPUT_SCREEN_INFO.scale).toInt() // 修复：引用重命名后的INPUT_SCREEN_INFO
+            mouseY = (y * INPUT_SCREEN_INFO.scale).toInt()
             if (isWaitingLongPress) {
                 val delta = abs(oldX - mouseX) + abs(oldY - mouseY)
                 Log.d(logTag,"delta:$delta")
@@ -512,21 +512,21 @@ class InputService : AccessibilityService() {
 
         when (mask) {
             TOUCH_PAN_UPDATE -> {
-                mouseX -= (_x * SCREEN_INFO.scale).toInt() // 修复：添加toInt()
-                mouseY -= (_y * SCREEN_INFO.scale).toInt()
+                mouseX -= (_x * INPUT_SCREEN_INFO.scale).toInt() // 修复：引用重命名后的INPUT_SCREEN_INFO
+                mouseY -= (_y * INPUT_SCREEN_INFO.scale).toInt()
                 mouseX = max(0, mouseX);
                 mouseY = max(0, mouseY);
                 continueGesture(mouseX, mouseY)
             }
             TOUCH_PAN_START -> {
-                mouseX = (max(0, _x) * SCREEN_INFO.scale).toInt() // 修复：添加toInt()
-                mouseY = (max(0, _y) * SCREEN_INFO.scale).toInt()
+                mouseX = (max(0, _x) * INPUT_SCREEN_INFO.scale).toInt() // 修复：引用重命名后的INPUT_SCREEN_INFO
+                mouseY = (max(0, _y) * INPUT_SCREEN_INFO.scale).toInt()
                 startGesture(mouseX, mouseY)
             }
             TOUCH_PAN_END -> {
                 endGesture(mouseX, mouseY)
-                mouseX = (max(0, _x) * SCREEN_INFO.scale).toInt() // 修复：添加toInt()
-                mouseY = (max(0, _y) * SCREEN_INFO.scale).toInt()
+                mouseX = (max(0, _x) * INPUT_SCREEN_INFO.scale).toInt() // 修复：引用重命名后的INPUT_SCREEN_INFO
+                mouseY = (max(0, _y) * INPUT_SCREEN_INFO.scale).toInt()
             }
             else -> {}
         }
@@ -1044,29 +1044,4 @@ class InputService : AccessibilityService() {
     }
 
     override fun onInterrupt() {}
-}
-
-// ========== 补全缺失的VolumeController类（核心修复） ==========
-class VolumeController(private val audioManager: AudioManager) {
-    fun raiseVolume(streamType: Int?, showUi: Boolean, defaultStream: Int) {
-        val stream = streamType ?: defaultStream
-        audioManager.adjustStreamVolume(stream, AudioManager.ADJUST_RAISE, if (showUi) AudioManager.FLAG_SHOW_UI else 0)
-    }
-
-    fun lowerVolume(streamType: Int?, showUi: Boolean, defaultStream: Int) {
-        val stream = streamType ?: defaultStream
-        audioManager.adjustStreamVolume(stream, AudioManager.ADJUST_LOWER, if (showUi) AudioManager.FLAG_SHOW_UI else 0)
-    }
-
-    fun toggleMute(showUi: Boolean, defaultStream: Int) {
-        val stream = defaultStream
-        val currentVolume = audioManager.getStreamVolume(stream)
-        val maxVolume = audioManager.getStreamMaxVolume(stream)
-        
-        if (currentVolume > 0) {
-            audioManager.setStreamVolume(stream, 0, if (showUi) AudioManager.FLAG_SHOW_UI else 0)
-        } else {
-            audioManager.setStreamVolume(stream, maxVolume / 2, if (showUi) AudioManager.FLAG_SHOW_UI else 0)
-        }
-    }
 }
