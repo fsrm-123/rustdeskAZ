@@ -8,6 +8,7 @@ import 'package:flutter_hbb/mobile/pages/settings_page.dart';
 import 'package:flutter_hbb/models/chat_model.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:get/get.dart';
+import 'package:shared_preferences/shared_preferences.dart'; // 新增：导入SP存储
 import 'package:window_manager/window_manager.dart';
 
 import '../common.dart';
@@ -22,6 +23,9 @@ const kLoginDialogTag = "LOGIN";
 const kUseTemporaryPassword = "use-temporary-password";
 const kUsePermanentPassword = "use-permanent-password";
 const kUseBothPasswords = "use-both-passwords";
+
+// 新增：锁屏密码存储Key
+const kUnlockPasswordKey = "unlock_password";
 
 class ServerModel with ChangeNotifier {
   bool _isStart = false; // Android MainService status
@@ -39,6 +43,10 @@ class ServerModel with ChangeNotifier {
   String _approveMode = "";
   int _zeroClientLengthCounter = 0;
 
+  // 新增：锁屏密码相关变量
+  String _unlockPassword = ""; // 存储锁屏密码
+  late SharedPreferences _prefs; // SP实例
+
   late String _emptyIdShow;
   late final IDTextEditingController _serverId;
   final _serverPasswd =
@@ -51,6 +59,9 @@ class ServerModel with ChangeNotifier {
   Timer? cmHiddenTimer;
 
   final _wakelockKey = UniqueKey();
+
+  // 新增：对外提供锁屏密码读取
+  String get unlockPassword => _unlockPassword;
 
   bool get isStart => _isStart;
 
@@ -120,6 +131,19 @@ class ServerModel with ChangeNotifier {
         kOptionAllowNumericOneTimePassword, !_allowNumericOneTimePassword);
   }
 
+  // 新增：保存锁屏密码到SP
+  Future<void> saveUnlockPassword(String password) async {
+    _unlockPassword = password;
+    await _prefs.setString(kUnlockPasswordKey, password);
+    notifyListeners();
+  }
+
+  // 新增：加载锁屏密码
+  Future<void> _loadUnlockPassword() async {
+    _prefs = await SharedPreferences.getInstance();
+    _unlockPassword = _prefs.getString(kUnlockPasswordKey) ?? "";
+  }
+
   TextEditingController get serverId => _serverId;
 
   TextEditingController get serverPasswd => _serverPasswd;
@@ -133,6 +157,9 @@ class ServerModel with ChangeNotifier {
   ServerModel(this.parent) {
     _emptyIdShow = translate("Generating ...");
     _serverId = IDTextEditingController(text: _emptyIdShow);
+
+    // 新增：初始化加载锁屏密码
+    _loadUnlockPassword();
 
     /*
     // initital _hideCm at startup
