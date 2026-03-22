@@ -26,8 +26,6 @@ import ffi.FFI
 import java.nio.ByteBuffer
 import java.util.*
 
-
-// intent action, extra
 const val ACT_REQUEST_MEDIA_PROJECTION = "REQUEST_MEDIA_PROJECTION"
 const val ACT_INIT_MEDIA_PROJECTION_AND_SERVICE = "INIT_MEDIA_PROJECTION_AND_SERVICE"
 const val ACT_LOGIN_REQ_NOTIFY = "LOGIN_REQ_NOTIFY"
@@ -35,14 +33,11 @@ const val EXT_INIT_FROM_BOOT = "EXT_INIT_FROM_BOOT"
 const val EXT_MEDIA_PROJECTION_RES_INTENT = "MEDIA_PROJECTION_RES_INTENT"
 const val EXT_LOGIN_REQ_NOTIFY = "LOGIN_REQ_NOTIFY"
 
-// Activity requestCode
 const val REQ_INVOKE_PERMISSION_ACTIVITY_MEDIA_PROJECTION = 101
 const val REQ_REQUEST_MEDIA_PROJECTION = 201
 
-// Activity responseCode
 const val RES_FAILED = -100
 
-// Flutter channel
 const val START_ACTION = "start_action"
 const val GET_START_ON_BOOT_OPT = "get_start_on_boot_opt"
 const val SET_START_ON_BOOT_OPT = "set_start_on_boot_opt"
@@ -57,15 +52,22 @@ const val KEY_APP_DIR_CONFIG_PATH = "KEY_APP_DIR_CONFIG_PATH"
 
 @SuppressLint("ConstantLocale")
 val LOCAL_NAME = Locale.getDefault().toString()
-// ========== 修复：重命名SCREEN_INFO为COMMON_SCREEN_INFO避免与InputService.kt冲突 ==========
-val COMMON_SCREEN_INFO = Info(0, 0, 1, 200)
 
+// ========== 修复：改为object单例，与InputService.kt中的使用方式兼容 ==========
+// 注意：scale初始值为1.0f，与InputService.kt中原来的INPUT_SCREEN_INFO保持一致
+object COMMON_SCREEN_INFO {
+    var width: Int = 0
+    var height: Int = 0
+    var scale: Float = 1.0f
+    var dpi: Int = 200
+}
+
+// 保留data class用于其他用途，或创建新实例
 data class Info(
     var width: Int, var height: Int, var scale: Int, var dpi: Int
 )
 
 fun isSupportVoiceCall(): Boolean {
-    // https://developer.android.com/reference/android/media/MediaRecorder.AudioSource#VOICE_COMMUNICATION
     return Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
 }
 
@@ -88,7 +90,6 @@ fun startAction(context: Context, action: String) {
     try {
         context.startActivity(Intent(action).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            // don't pass package name when launch ACTION_ACCESSIBILITY_SETTINGS
             if (ACTION_ACCESSIBILITY_SETTINGS != action) {
                 data = Uri.parse("package:" + context.packageName)
             }
@@ -134,7 +135,6 @@ class AudioReader(val bufSize: Int, private val maxFrames: Int) {
     }
 }
 
-
 fun getScreenSize(windowManager: WindowManager) : Pair<Int, Int>{
     var w = 0
     var h = 0
@@ -152,7 +152,7 @@ fun getScreenSize(windowManager: WindowManager) : Pair<Int, Int>{
     return Pair(w, h)
 }
 
- fun translate(input: String): String {
+fun translate(input: String): String {
     Log.d("common", "translate:$LOCAL_NAME")
     return FFI.translateLocale(LOCAL_NAME, input)
 }
