@@ -57,7 +57,8 @@ const val KEY_APP_DIR_CONFIG_PATH = "KEY_APP_DIR_CONFIG_PATH"
 
 @SuppressLint("ConstantLocale")
 val LOCAL_NAME = Locale.getDefault().toString()
-val SCREEN_INFO = Info(0, 0, 1, 200)
+// ========== 修复：重命名SCREEN_INFO为COMMON_SCREEN_INFO避免与InputService.kt冲突 ==========
+val COMMON_SCREEN_INFO = Info(0, 0, 1, 200)
 
 data class Info(
     var width: Int, var height: Int, var scale: Int, var dpi: Int
