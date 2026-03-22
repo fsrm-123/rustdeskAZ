@@ -98,9 +98,9 @@ class MainService : Service() {
         return when (name) {
             "screen_size" -> {
                 JSONObject().apply {
-                    put("width",SCREEN_INFO.width)
-                    put("height",SCREEN_INFO.height)
-                    put("scale",SCREEN_INFO.scale)
+                    put("width", COMMON_SCREEN_INFO.width)
+                    put("height", COMMON_SCREEN_INFO.height)
+                    put("scale", COMMON_SCREEN_INFO.scale)
                 }.toString()
             }
             "is_start" -> {
@@ -293,11 +293,11 @@ class MainService : Service() {
                 h /= scale
                 dpi /= scale
             }
-            if (SCREEN_INFO.width != w) {
-                SCREEN_INFO.width = w
-                SCREEN_INFO.height = h
-                SCREEN_INFO.scale = scale
-                SCREEN_INFO.dpi = dpi
+            if (COMMON_SCREEN_INFO.width != w) {
+                COMMON_SCREEN_INFO.width = w
+                COMMON_SCREEN_INFO.height = h
+                COMMON_SCREEN_INFO.scale = scale
+                COMMON_SCREEN_INFO.dpi = dpi
                 if (isStart) {
                     stopCapture()
                     FFI.refreshScreen()
@@ -368,11 +368,11 @@ class MainService : Service() {
             // TODO
             null
         } else {
-            Log.d(logTag, "ImageReader.newInstance:INFO:$SCREEN_INFO")
+            Log.d(logTag, "ImageReader.newInstance:INFO:$COMMON_SCREEN_INFO")
             imageReader =
                 ImageReader.newInstance(
-                    SCREEN_INFO.width,
-                    SCREEN_INFO.height,
+                    COMMON_SCREEN_INFO.width,
+                    COMMON_SCREEN_INFO.height,
                     PixelFormat.RGBA_8888,
                     4
                 ).apply {
@@ -510,7 +510,7 @@ class MainService : Service() {
     }
 
     private fun startRawVideoRecorder(mp: MediaProjection) {
-        Log.d(logTag, "startRawVideoRecorder,screen info:$SCREEN_INFO")
+        Log.d(logTag, "startRawVideoRecorder,screen info:$COMMON_SCREEN_INFO")
         if (surface == null) {
             Log.d(logTag, "startRawVideoRecorder failed,surface is null")
             return
@@ -536,12 +536,12 @@ class MainService : Service() {
     private fun createOrSetVirtualDisplay(mp: MediaProjection, s: Surface) {
         try {
             virtualDisplay?.let {
-                it.resize(SCREEN_INFO.width, SCREEN_INFO.height, SCREEN_INFO.dpi)
+                it.resize(COMMON_SCREEN_INFO.width, COMMON_SCREEN_INFO.height, COMMON_SCREEN_INFO.dpi)
                 it.setSurface(s)
             } ?: let {
                 virtualDisplay = mp.createVirtualDisplay(
                     "RustDeskVD",
-                    SCREEN_INFO.width, SCREEN_INFO.height, SCREEN_INFO.dpi, VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                    COMMON_SCREEN_INFO.width, COMMON_SCREEN_INFO.height, COMMON_SCREEN_INFO.dpi, VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
                     s, null, null
                 )
             }
@@ -580,7 +580,7 @@ class MainService : Service() {
         Log.d(logTag, "MediaFormat.MIMETYPE_VIDEO_VP9 :$MIME_TYPE")
         videoEncoder = MediaCodec.createEncoderByType(MIME_TYPE)
         val mFormat =
-            MediaFormat.createVideoFormat(MIME_TYPE, SCREEN_INFO.width, SCREEN_INFO.height)
+            MediaFormat.createVideoFormat(MIME_TYPE, COMMON_SCREEN_INFO.width, COMMON_SCREEN_INFO.height)
         mFormat.setInteger(MediaFormat.KEY_BIT_RATE, VIDEO_KEY_BIT_RATE)
         mFormat.setInteger(MediaFormat.KEY_FRAME_RATE, VIDEO_KEY_FRAME_RATE)
         mFormat.setInteger(
