@@ -27,6 +27,8 @@ dependencies:
   flutter_localizations:
     sdk: flutter
 
+  # 新增 shared_preferences 依赖（适配 Flutter 3.1.x 和现有依赖版本）
+  shared_preferences: ^2.2.2
   ffi: ^2.1.0
   path_provider: ^2.1.1
   external_path: ^1.0.3
