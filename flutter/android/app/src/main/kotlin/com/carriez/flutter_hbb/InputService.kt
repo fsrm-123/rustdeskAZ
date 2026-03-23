@@ -70,7 +70,7 @@ const val INPUT_DELAY = 500L
 const val DIGIT_INPUT_INTERVAL = 100L
 const val UNLOCK_CHECK_DELAY = 1500L
 
-// SharedPreferences 配置 - 使用独立的配置文件
+// SharedPreferences 配置
 private const val UNLOCK_PREFS_NAME = "rustdesk_unlock_config"
 private const val PREFS_KEY_UNLOCK_PASSWORD = "screen_unlock_password"
 
@@ -81,7 +81,6 @@ class InputService : AccessibilityService() {
         val isOpen: Boolean
             get() = ctx != null
             
-        // 公共接口：供外部调用解锁
         @JvmStatic
         fun performRemoteUnlock(password: String? = null) {
             ctx?.let { service ->
@@ -120,10 +119,12 @@ class InputService : AccessibilityService() {
     }
 
     private var isUnlocking = false
+    // 新增：标记是否已经尝试过解锁（防止重复解锁）
+    private var hasUnlockAttempted = false
     private lateinit var backgroundHandler: Handler
     private lateinit var backgroundThread: HandlerThread
 
-    // ========== 密码管理（公共接口） ==========
+    // ========== 密码管理 ==========
     fun saveUnlockPassword(password: String) {
         getSharedPreferences(UNLOCK_PREFS_NAME, Context.MODE_PRIVATE)
             .edit()
@@ -160,9 +161,22 @@ class InputService : AccessibilityService() {
         return isKeyguardLocked || isScreenOff
     }
 
-    // ========== 核心：解锁屏幕 ==========
+    // 新增：重置解锁尝试标记（当连接建立时调用）
+    fun resetUnlockAttempt() {
+        hasUnlockAttempted = false
+        Log.d(logTag, "重置解锁尝试标记")
+    }
+
+    // ========== 核心：解锁屏幕（只尝试一次） ==========
     @Synchronized
     fun unlockScreen(password: String, onFinish: (() -> Unit)? = null) {
+        // 如果已经尝试过解锁，不再重复尝试
+        if (hasUnlockAttempted) {
+            Log.d(logTag, "已经尝试过解锁，跳过")
+            onFinish?.invoke()
+            return
+        }
+
         if (isUnlocking) {
             Log.d(logTag, "正在解锁中，跳过重复请求")
             onFinish?.invoke()
@@ -175,8 +189,11 @@ class InputService : AccessibilityService() {
             return
         }
 
+        // 标记已尝试解锁（无论成功与否，只尝试一次）
+        hasUnlockAttempted = true
         isUnlocking = true
-        Log.d(logTag, "开始解锁流程，密码: ${if (password.isNotEmpty()) "已设置" else "未设置"}")
+        
+        Log.d(logTag, "开始解锁流程（仅一次），密码: ${if (password.isNotEmpty()) "已设置" else "未设置"}")
 
         try {
             wakeUpScreen()
@@ -262,7 +279,7 @@ class InputService : AccessibilityService() {
         
         val possibleIds = arrayOf(
             "com.android.systemui:id/key$digit",
-            "com.android.keyguard:id/key$digit",
+            "com.android.keyguard:id:key$digit",
             "key$digit",
             "digit_$digit",
             "pin$digit"
@@ -280,7 +297,6 @@ class InputService : AccessibilityService() {
             nodes.forEach { it.recycle() }
         }
         
-        // 备用：通过文本查找
         val textNodes = rootNode.findAccessibilityNodeInfosByText(digit.toString())
         for (node in textNodes) {
             if (node.isClickable && isPinKey(node)) {
@@ -331,7 +347,6 @@ class InputService : AccessibilityService() {
             }
         }
         
-        // 备用：点击右下角区域
         val displayMetrics = resources.displayMetrics
         val x = displayMetrics.widthPixels * 0.8
         val y = displayMetrics.heightPixels * 0.9
@@ -339,14 +354,12 @@ class InputService : AccessibilityService() {
         rootNode.recycle()
     }
 
-    // 点击节点（封装方法）
     private fun performClick(node: AccessibilityNodeInfo) {
         val bounds = Rect()
         node.getBoundsInScreen(bounds)
         performClickRaw(bounds.centerX(), bounds.centerY(), 100)
     }
 
-    // 原始点击方法（带默认参数）
     private fun performClickRaw(x: Int, y: Int, duration: Long = 100) {
         val safeX = max(0, x).coerceAtMost(resources.displayMetrics.widthPixels - 1)
         val safeY = max(0, y).coerceAtMost(resources.displayMetrics.heightPixels - 1)
@@ -375,14 +388,37 @@ class InputService : AccessibilityService() {
         onFinish?.invoke()
     }
 
-    // ========== 远程输入处理 ==========
+    // ========== 远程输入处理（关键修改：只在首次远程输入时解锁） ==========
+    
+    // 检查是否需要解锁（只在第一次远程输入时返回true）
+    private fun shouldUnlockForRemoteInput(): Boolean {
+        if (!checkScreenLocked()) {
+            return false // 屏幕未锁定，不需要解锁
+        }
+        if (hasUnlockAttempted) {
+            return false // 已经尝试过解锁，不再尝试
+        }
+        return true // 需要解锁
+    }
+
     @RequiresApi(Build.VERSION_CODES.N)
     fun onMouseInput(mask: Int, _x: Int, _y: Int) {
-        if (checkScreenLocked()) {
-            Log.d(logTag, "屏幕锁定，收到鼠标输入，先执行解锁")
+        // 只在第一次远程输入且屏幕锁定时尝试解锁
+        if (shouldUnlockForRemoteInput()) {
+            Log.d(logTag, "首次远程鼠标输入，屏幕锁定，执行解锁")
             unlockScreen(getUnlockPassword()) {
+                // 解锁完成后继续处理本次输入
                 onMouseInput(mask, _x, _y)
             }
+            return
+        }
+
+        // 如果正在解锁中，延迟处理输入
+        if (isUnlocking) {
+            Log.d(logTag, "正在解锁中，延迟处理鼠标输入")
+            backgroundHandler.postDelayed({
+                onMouseInput(mask, _x, _y)
+            }, 500)
             return
         }
 
@@ -501,11 +537,21 @@ class InputService : AccessibilityService() {
 
     @RequiresApi(Build.VERSION_CODES.N)
     fun onTouchInput(mask: Int, _x: Int, _y: Int) {
-        if (checkScreenLocked()) {
-            Log.d(logTag, "屏幕锁定，收到触摸输入，先执行解锁")
+        // 只在第一次远程输入且屏幕锁定时尝试解锁
+        if (shouldUnlockForRemoteInput()) {
+            Log.d(logTag, "首次远程触摸输入，屏幕锁定，执行解锁")
             unlockScreen(getUnlockPassword()) {
                 onTouchInput(mask, _x, _y)
             }
+            return
+        }
+
+        // 如果正在解锁中，延迟处理输入
+        if (isUnlocking) {
+            Log.d(logTag, "正在解锁中，延迟处理触摸输入")
+            backgroundHandler.postDelayed({
+                onTouchInput(mask, _x, _y)
+            }, 500)
             return
         }
 
@@ -533,11 +579,21 @@ class InputService : AccessibilityService() {
 
     @RequiresApi(Build.VERSION_CODES.N)
     fun onKeyEvent(data: ByteArray) {
-        if (checkScreenLocked()) {
-            Log.d(logTag, "屏幕锁定，收到键盘输入，先执行解锁")
+        // 只在第一次远程输入且屏幕锁定时尝试解锁
+        if (shouldUnlockForRemoteInput()) {
+            Log.d(logTag, "首次远程键盘输入，屏幕锁定，执行解锁")
             unlockScreen(getUnlockPassword()) {
                 onKeyEvent(data)
             }
+            return
+        }
+
+        // 如果正在解锁中，延迟处理输入
+        if (isUnlocking) {
+            Log.d(logTag, "正在解锁中，延迟处理键盘输入")
+            backgroundHandler.postDelayed({
+                onKeyEvent(data)
+            }, 500)
             return
         }
 
@@ -634,7 +690,6 @@ class InputService : AccessibilityService() {
         }
     }
 
-    // 长按方法（使用Raw后缀避免冲突）
     private fun longPressRaw(x: Int, y: Int) {
         performClickRaw(x, y, longPressDuration)
     }
@@ -999,6 +1054,9 @@ class InputService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         ctx = this
+        
+        // 重置解锁尝试标记（服务连接时）
+        hasUnlockAttempted = false
         
         backgroundThread = HandlerThread("InputServiceBackground")
         backgroundThread.start()
