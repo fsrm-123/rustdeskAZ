@@ -34,6 +34,9 @@ import android.annotation.SuppressLint
 import android.content.SharedPreferences
 import java.util.*
 import java.lang.Character
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.locks.ReentrantLock
+import kotlin.concurrent.withLock
 import kotlin.math.abs
 import kotlin.math.max
 import hbb.MessageOuterClass.KeyEvent
@@ -118,9 +121,15 @@ class InputService : AccessibilityService() {
         VolumeController(applicationContext.getSystemService(AUDIO_SERVICE) as AudioManager) 
     }
 
-    private var isUnlocking = false
-    // 新增：标记是否已经尝试过解锁（防止重复解锁）
-    private var hasUnlockAttempted = false
+    // ========== 解锁状态管理（线程安全） ==========
+    // 使用 AtomicBoolean 确保线程安全的状态检查
+    private val isUnlocking = AtomicBoolean(false)
+    // 使用 Lock 确保解锁操作的互斥性
+    private val unlockLock = ReentrantLock()
+    private val unlockCondition = unlockLock.newCondition()
+    // 标记本次会话是否已经解锁过（防止重复解锁）
+    private var hasUnlockedInThisSession = false
+    
     private lateinit var backgroundHandler: Handler
     private lateinit var backgroundThread: HandlerThread
 
@@ -161,64 +170,109 @@ class InputService : AccessibilityService() {
         return isKeyguardLocked || isScreenOff
     }
 
-    // 新增：重置解锁尝试标记（当连接建立时调用）
-    fun resetUnlockAttempt() {
-        hasUnlockAttempted = false
-        Log.d(logTag, "重置解锁尝试标记")
+    // ========== 会话管理 ==========
+    // 新会话开始时调用（控制端连接时）
+    fun onSessionStarted() {
+        unlockLock.withLock {
+            hasUnlockedInThisSession = false
+            Log.d(logTag, "新会话开始，重置解锁状态")
+        }
     }
 
-    // ========== 核心：解锁屏幕（只尝试一次） ==========
-    @Synchronized
-    fun unlockScreen(password: String, onFinish: (() -> Unit)? = null) {
-        // 如果已经尝试过解锁，不再重复尝试
-        if (hasUnlockAttempted) {
-            Log.d(logTag, "已经尝试过解锁，跳过")
-            onFinish?.invoke()
-            return
-        }
-
-        if (isUnlocking) {
-            Log.d(logTag, "正在解锁中，跳过重复请求")
-            onFinish?.invoke()
-            return
-        }
-        
+    // ========== 核心：线程安全的解锁机制 ==========
+    
+    /**
+     * 确保屏幕已解锁。如果正在解锁中，则等待解锁完成。
+     * 如果屏幕已解锁或本次会话已解锁过，直接返回。
+     * 
+     * @return true 表示屏幕已解锁（或原本就未锁定），可以继续操作
+     *         false 表示解锁失败或无需解锁
+     */
+    private fun ensureUnlocked(): Boolean {
+        // 快速路径：检查是否需要解锁
         if (!checkScreenLocked()) {
-            Log.d(logTag, "屏幕未锁定，无需解锁")
-            onFinish?.invoke()
-            return
+            return true // 屏幕未锁定，直接继续
         }
-
-        // 标记已尝试解锁（无论成功与否，只尝试一次）
-        hasUnlockAttempted = true
-        isUnlocking = true
         
-        Log.d(logTag, "开始解锁流程（仅一次），密码: ${if (password.isNotEmpty()) "已设置" else "未设置"}")
-
-        try {
-            wakeUpScreen()
-            
-            backgroundHandler.postDelayed({
-                performSwipeUp()
-                
-                backgroundHandler.postDelayed({
-                    if (password.isNotEmpty()) {
-                        inputPassword(password)
-                        backgroundHandler.postDelayed({
-                            completeUnlock(onFinish)
-                        }, password.length * DIGIT_INPUT_INTERVAL + 300L)
-                    } else {
-                        Log.d(logTag, "无密码，跳过密码输入")
-                        completeUnlock(onFinish)
+        // 检查是否已在本会话解锁过
+        unlockLock.withLock {
+            if (hasUnlockedInThisSession) {
+                Log.d(logTag, "本次会话已解锁过，跳过")
+                return true
+            }
+        }
+        
+        // 尝试获取解锁权限
+        if (!isUnlocking.compareAndSet(false, true)) {
+            // 其他方法正在解锁，等待其完成
+            Log.d(logTag, "其他方法正在解锁，等待中...")
+            unlockLock.withLock {
+                while (isUnlocking.get()) {
+                    try {
+                        unlockCondition.awaitNanos(100_000_000) // 等待100ms
+                    } catch (e: InterruptedException) {
+                        Thread.currentThread().interrupt()
+                        return false
                     }
-                }, INPUT_DELAY)
-                
-            }, SWIPE_UP_DELAY)
+                }
+            }
+            Log.d(logTag, "等待解锁完成，继续操作")
+            return !checkScreenLocked() // 返回当前屏幕状态
+        }
+        
+        // 获取到解锁权限，执行解锁
+        try {
+            val password = getUnlockPassword()
+            Log.d(logTag, "获取解锁权限，开始解锁，密码: ${if (password.isNotEmpty()) "已设置" else "未设置"}")
+            
+            val unlockSuccess = performUnlockInternal(password)
+            
+            unlockLock.withLock {
+                hasUnlockedInThisSession = true
+            }
+            
+            return unlockSuccess
+            
+        } finally {
+            // 释放解锁状态并通知等待的线程
+            unlockLock.withLock {
+                isUnlocking.set(false)
+                unlockCondition.signalAll() // 唤醒所有等待的线程
+            }
+        }
+    }
+    
+    /**
+     * 内部解锁实现（同步执行）
+     */
+    private fun performUnlockInternal(password: String): Boolean {
+        return try {
+            wakeUpScreen()
+            Thread.sleep(SWIPE_UP_DELAY)
+            
+            performSwipeUp()
+            Thread.sleep(INPUT_DELAY)
+            
+            if (password.isNotEmpty()) {
+                inputPassword(password)
+                Thread.sleep(password.length * DIGIT_INPUT_INTERVAL + 300L)
+            } else {
+                Log.d(logTag, "无密码，跳过密码输入")
+                // 等待系统响应
+                Thread.sleep(800L)
+            }
+            
+            val stillLocked = checkScreenLocked()
+            if (stillLocked) {
+                Log.w(logTag, "解锁后屏幕仍锁定，可能密码错误或解锁失败")
+            } else {
+                Log.d(logTag, "解锁成功")
+            }
+            !stillLocked
             
         } catch (e: Exception) {
-            Log.e(logTag, "解锁失败: ${e.message}", e)
-            isUnlocking = false
-            onFinish?.invoke()
+            Log.e(logTag, "解锁过程异常: ${e.message}", e)
+            false
         }
     }
 
@@ -266,6 +320,7 @@ class InputService : AccessibilityService() {
             }, index * DIGIT_INPUT_INTERVAL)
         }
         
+        // 最后点击确认
         backgroundHandler.postDelayed({
             clickEnter()
         }, password.length * DIGIT_INPUT_INTERVAL + 100L)
@@ -347,6 +402,7 @@ class InputService : AccessibilityService() {
             }
         }
         
+        // 备用方案：点击屏幕右下角
         val displayMetrics = resources.displayMetrics
         val x = displayMetrics.widthPixels * 0.8
         val y = displayMetrics.heightPixels * 0.9
@@ -381,44 +437,13 @@ class InputService : AccessibilityService() {
         return bounds.centerY() > resources.displayMetrics.heightPixels * 0.5
     }
 
-    private fun completeUnlock(onFinish: (() -> Unit)?) {
-        val stillLocked = checkScreenLocked()
-        Log.d(logTag, if (stillLocked) "解锁可能失败，屏幕仍锁定" else "解锁完成")
-        isUnlocking = false
-        onFinish?.invoke()
-    }
-
-    // ========== 远程输入处理（关键修改：只在首次远程输入时解锁） ==========
+    // ========== 远程输入处理（统一的解锁检查） ==========
     
-    // 检查是否需要解锁（只在第一次远程输入时返回true）
-    private fun shouldUnlockForRemoteInput(): Boolean {
-        if (!checkScreenLocked()) {
-            return false // 屏幕未锁定，不需要解锁
-        }
-        if (hasUnlockAttempted) {
-            return false // 已经尝试过解锁，不再尝试
-        }
-        return true // 需要解锁
-    }
-
     @RequiresApi(Build.VERSION_CODES.N)
     fun onMouseInput(mask: Int, _x: Int, _y: Int) {
-        // 只在第一次远程输入且屏幕锁定时尝试解锁
-        if (shouldUnlockForRemoteInput()) {
-            Log.d(logTag, "首次远程鼠标输入，屏幕锁定，执行解锁")
-            unlockScreen(getUnlockPassword()) {
-                // 解锁完成后继续处理本次输入
-                onMouseInput(mask, _x, _y)
-            }
-            return
-        }
-
-        // 如果正在解锁中，延迟处理输入
-        if (isUnlocking) {
-            Log.d(logTag, "正在解锁中，延迟处理鼠标输入")
-            backgroundHandler.postDelayed({
-                onMouseInput(mask, _x, _y)
-            }, 500)
+        // 确保屏幕已解锁（线程安全，不会重复触发）
+        if (!ensureUnlocked()) {
+            Log.w(logTag, "屏幕锁定且解锁失败，跳过鼠标输入")
             return
         }
 
@@ -537,21 +562,9 @@ class InputService : AccessibilityService() {
 
     @RequiresApi(Build.VERSION_CODES.N)
     fun onTouchInput(mask: Int, _x: Int, _y: Int) {
-        // 只在第一次远程输入且屏幕锁定时尝试解锁
-        if (shouldUnlockForRemoteInput()) {
-            Log.d(logTag, "首次远程触摸输入，屏幕锁定，执行解锁")
-            unlockScreen(getUnlockPassword()) {
-                onTouchInput(mask, _x, _y)
-            }
-            return
-        }
-
-        // 如果正在解锁中，延迟处理输入
-        if (isUnlocking) {
-            Log.d(logTag, "正在解锁中，延迟处理触摸输入")
-            backgroundHandler.postDelayed({
-                onTouchInput(mask, _x, _y)
-            }, 500)
+        // 确保屏幕已解锁（线程安全，不会重复触发）
+        if (!ensureUnlocked()) {
+            Log.w(logTag, "屏幕锁定且解锁失败，跳过触摸输入")
             return
         }
 
@@ -579,21 +592,9 @@ class InputService : AccessibilityService() {
 
     @RequiresApi(Build.VERSION_CODES.N)
     fun onKeyEvent(data: ByteArray) {
-        // 只在第一次远程输入且屏幕锁定时尝试解锁
-        if (shouldUnlockForRemoteInput()) {
-            Log.d(logTag, "首次远程键盘输入，屏幕锁定，执行解锁")
-            unlockScreen(getUnlockPassword()) {
-                onKeyEvent(data)
-            }
-            return
-        }
-
-        // 如果正在解锁中，延迟处理输入
-        if (isUnlocking) {
-            Log.d(logTag, "正在解锁中，延迟处理键盘输入")
-            backgroundHandler.postDelayed({
-                onKeyEvent(data)
-            }, 500)
+        // 确保屏幕已解锁（线程安全，不会重复触发）
+        if (!ensureUnlocked()) {
+            Log.w(logTag, "屏幕锁定且解锁失败，跳过键盘输入")
             return
         }
 
@@ -1055,12 +1056,15 @@ class InputService : AccessibilityService() {
         super.onServiceConnected()
         ctx = this
         
-        // 重置解锁尝试标记（服务连接时）
-        hasUnlockAttempted = false
-        
         backgroundThread = HandlerThread("InputServiceBackground")
         backgroundThread.start()
         backgroundHandler = Handler(backgroundThread.looper)
+        
+        // 重置会话状态
+        unlockLock.withLock {
+            hasUnlockedInThisSession = false
+            isUnlocking.set(false)
+        }
         
         val info = AccessibilityServiceInfo()
         if (Build.VERSION.SDK_INT >= 33) {
@@ -1080,6 +1084,11 @@ class InputService : AccessibilityService() {
 
     override fun onDestroy() {
         ctx = null
+        // 确保释放锁，避免死锁
+        unlockLock.withLock {
+            isUnlocking.set(false)
+            unlockCondition.signalAll()
+        }
         backgroundThread.quitSafely()
         super.onDestroy()
     }
