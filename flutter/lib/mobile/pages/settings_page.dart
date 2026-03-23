@@ -17,7 +17,7 @@ import '../../common/widgets/login.dart';
 import '../../consts.dart';
 import '../../models/model.dart';
 import '../../models/platform_model.dart';
-import '../../models/server_model.dart'; // 新增：导入ServerModel
+import '../../models/server_model.dart';
 import '../widgets/dialog.dart';
 import 'home_page.dart';
 import 'scan_page.dart';
@@ -68,13 +68,13 @@ KeepScreenOn optionToKeepScreenOn(String value) {
 
 class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
   final _hasIgnoreBattery =
-      false; //androidVersion >= 26; // remove because not work on every device
+      false;
   var _ignoreBatteryOpt = false;
   var _enableStartOnBoot = false;
   var _checkUpdateOnStartup = false;
   var _showTerminalExtraKeys = false;
   var _floatingWindowDisabled = false;
-  var _keepScreenOn = KeepScreenOn.duringControlled; // relay on floating window
+  var _keepScreenOn = KeepScreenOn.duringControlled;
   var _enableAbr = false;
   var _denyLANDiscovery = false;
   var _onlyWhiteList = false;
@@ -103,9 +103,8 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
   var _allowAskForNoteAtEndOfConnection = false;
   var _preventSleepWhileConnected = true;
 
-  // 新增：锁屏密码控制器
+  // 锁屏密码控制器
   late TextEditingController _unlockPwdController;
-  // 新增：存储当前保存的锁屏密码
   String _currentUnlockPwd = "";
 
   _SettingsState() {
@@ -158,10 +157,11 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
 
-    // 新增：初始化锁屏密码控制器
-    final serverModel = Provider.of<ServerModel>(context, listen: false);
-    _currentUnlockPwd = serverModel.unlockPassword;
-    _unlockPwdController = TextEditingController(text: _currentUnlockPwd);
+    // 初始化锁屏密码控制器
+    _unlockPwdController = TextEditingController();
+    
+    // 从原生层读取已保存的密码
+    _loadUnlockPassword();
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       var update = false;
@@ -176,7 +176,6 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
         update = true;
       }
 
-      // start on boot depends on ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS and SYSTEM_ALERT_WINDOW
       var enableStartOnBoot =
           await gFFI.invokeMethod(AndroidChannel.kGetStartOnBootOpt);
       if (enableStartOnBoot) {
@@ -239,10 +238,22 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
     });
   }
 
+  // 新增：从原生层加载密码
+  Future<void> _loadUnlockPassword() async {
+    try {
+      final pwd = await gFFI.invokeMethod('get_unlock_password') as String? ?? '';
+      setState(() {
+        _currentUnlockPwd = pwd;
+        _unlockPwdController.text = pwd;
+      });
+    } catch (e) {
+      debugPrint("加载解锁密码失败: $e");
+    }
+  }
+
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    // 新增：释放锁屏密码控制器
     _unlockPwdController.dispose();
     super.dispose();
   }
@@ -283,20 +294,23 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
     }
   }
 
-  // 新增：保存锁屏密码方法
-  void _saveUnlockPassword() {
+  // 修改：保存锁屏密码方法，调用原生接口
+  Future<void> _saveUnlockPassword() async {
     final newPwd = _unlockPwdController.text.trim();
-    if (newPwd.isEmpty) {
-      showToast(translate("Unlock password cannot be empty"));
-      return;
-    }
     
-    final serverModel = Provider.of<ServerModel>(context, listen: false);
-    serverModel.saveUnlockPassword(newPwd);
-    setState(() {
-      _currentUnlockPwd = newPwd;
-    });
-    showToast(translate("Unlock password saved successfully"));
+    try {
+      await gFFI.invokeMethod('save_unlock_password', {
+        'password': newPwd,
+      });
+      
+      setState(() {
+        _currentUnlockPwd = newPwd;
+      });
+      
+      showToast(translate("Unlock password saved successfully"));
+    } catch (e) {
+      showToast(translate("Failed to save unlock password: $e"));
+    }
   }
 
   @override
@@ -551,7 +565,7 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
       )
     ];
 
-    // 新增：锁屏密码设置项
+    // 锁屏密码设置项
     final List<AbstractSettingsTile> unlockPasswordTiles = [
       SettingsTile(
         title: Column(
@@ -596,8 +610,8 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
                       SizedBox(width: 10),
                       Expanded(
                         child: ElevatedButton(
-                          onPressed: () {
-                            _saveUnlockPassword();
+                          onPressed: () async {
+                            await _saveUnlockPassword();
                             close();
                           },
                           child: Text(translate('Save')),
@@ -661,7 +675,6 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
         ]),
         onToggle: (toValue) async {
           if (toValue) {
-            // 1. request kIgnoreBatteryOptimizations
             if (!await AndroidPermissionManager.check(
                 kRequestIgnoreBatteryOptimizations)) {
               if (!await AndroidPermissionManager.request(
@@ -670,14 +683,11 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
               }
             }
 
-            // 2. request kSystemAlertWindow
             if (!await AndroidPermissionManager.check(kSystemAlertWindow)) {
               if (!await AndroidPermissionManager.request(kSystemAlertWindow)) {
                 return;
               }
             }
-
-            // (Optional) 3. request input permission
           }
           setState(() => _enableStartOnBoot = toValue);
 
@@ -942,7 +952,6 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
                 });
               },
             ),
-          // 新增：添加锁屏密码设置项到设置列表
           if (isAndroid && !disabledSettings)
             ...unlockPasswordTiles,
         ]),
@@ -1083,7 +1092,6 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
   }
 
   Future<bool> canStartOnBoot() async {
-    // start on boot depends on ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS and SYSTEM_ALERT_WINDOW
     if (_hasIgnoreBattery && !_ignoreBatteryOpt) {
       return false;
     }
