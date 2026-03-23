@@ -335,17 +335,19 @@ class InputService : AccessibilityService() {
         val displayMetrics = resources.displayMetrics
         val x = displayMetrics.widthPixels * 0.8
         val y = displayMetrics.heightPixels * 0.9
-        performClick(x.toInt(), y.toInt(), 100)
+        performClickRaw(x.toInt(), y.toInt(), 100)
         rootNode.recycle()
     }
 
+    // 点击节点（封装方法）
     private fun performClick(node: AccessibilityNodeInfo) {
         val bounds = Rect()
         node.getBoundsInScreen(bounds)
-        performClick(bounds.centerX(), bounds.centerY(), 100)
+        performClickRaw(bounds.centerX(), bounds.centerY(), 100)
     }
 
-    private fun performClick(x: Int, y: Int, duration: Long = 100) {
+    // 原始点击方法（带默认参数）
+    private fun performClickRaw(x: Int, y: Int, duration: Long = 100) {
         val safeX = max(0, x).coerceAtMost(resources.displayMetrics.widthPixels - 1)
         val safeY = max(0, y).coerceAtMost(resources.displayMetrics.heightPixels - 1)
         
@@ -373,14 +375,12 @@ class InputService : AccessibilityService() {
         onFinish?.invoke()
     }
 
-    // ========== 远程输入处理（关键修改：移除设置界面检测，改为锁屏检测） ==========
+    // ========== 远程输入处理 ==========
     @RequiresApi(Build.VERSION_CODES.N)
     fun onMouseInput(mask: Int, _x: Int, _y: Int) {
-        // 修改：检测屏幕锁定，如果锁定则先解锁
         if (checkScreenLocked()) {
             Log.d(logTag, "屏幕锁定，收到鼠标输入，先执行解锁")
             unlockScreen(getUnlockPassword()) {
-                // 解锁完成后继续处理本次输入
                 onMouseInput(mask, _x, _y)
             }
             return
@@ -433,7 +433,7 @@ class InputService : AccessibilityService() {
         }
 
         if (mask == RIGHT_UP) {
-            longPress(mouseX, mouseY)
+            longPressRaw(mouseX, mouseY)
             return
         }
 
@@ -501,7 +501,6 @@ class InputService : AccessibilityService() {
 
     @RequiresApi(Build.VERSION_CODES.N)
     fun onTouchInput(mask: Int, _x: Int, _y: Int) {
-        // 修改：检测屏幕锁定，如果锁定则先解锁
         if (checkScreenLocked()) {
             Log.d(logTag, "屏幕锁定，收到触摸输入，先执行解锁")
             unlockScreen(getUnlockPassword()) {
@@ -534,7 +533,6 @@ class InputService : AccessibilityService() {
 
     @RequiresApi(Build.VERSION_CODES.N)
     fun onKeyEvent(data: ByteArray) {
-        // 修改：检测屏幕锁定，如果锁定则先解锁
         if (checkScreenLocked()) {
             Log.d(logTag, "屏幕锁定，收到键盘输入，先执行解锁")
             unlockScreen(getUnlockPassword()) {
@@ -636,24 +634,9 @@ class InputService : AccessibilityService() {
         }
     }
 
-    @RequiresApi(Build.VERSION_CODES.N)
-    private fun performClick(x: Int, y: Int, duration: Long) {
-        val path = Path()
-        path.moveTo(x.toFloat(), y.toFloat())
-        try {
-            val longPressStroke = GestureDescription.StrokeDescription(path, 0, duration)
-            val builder = GestureDescription.Builder()
-            builder.addStroke(longPressStroke)
-            Log.d(logTag, "performClick x:$x y:$y time:$duration")
-            dispatchGesture(builder.build(), null, null)
-        } catch (e: Exception) {
-            Log.e(logTag, "performClick, error:$e")
-        }
-    }
-
-    @RequiresApi(Build.VERSION_CODES.N)
-    private fun longPress(x: Int, y: Int) {
-        performClick(x, y, longPressDuration)
+    // 长按方法（使用Raw后缀避免冲突）
+    private fun longPressRaw(x: Int, y: Int) {
+        performClickRaw(x, y, longPressDuration)
     }
 
     private fun startGesture(x: Int, y: Int) {
@@ -1017,12 +1000,10 @@ class InputService : AccessibilityService() {
         super.onServiceConnected()
         ctx = this
         
-        // 初始化子线程Handler
         backgroundThread = HandlerThread("InputServiceBackground")
         backgroundThread.start()
         backgroundHandler = Handler(backgroundThread.looper)
         
-        // 降低辅助功能权限
         val info = AccessibilityServiceInfo()
         if (Build.VERSION.SDK_INT >= 33) {
             info.flags = FLAG_INPUT_METHOD_EDITOR
