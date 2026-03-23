@@ -25,7 +25,6 @@ import android.graphics.Rect
 import android.media.AudioManager
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.accessibilityservice.AccessibilityServiceInfo.FLAG_INPUT_METHOD_EDITOR
-import android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
 import android.view.inputmethod.EditorInfo
 import androidx.annotation.RequiresApi
 import android.app.KeyguardManager
@@ -65,18 +64,15 @@ const val WHEEL_STEP = 120
 const val WHEEL_DURATION = 50L
 const val LONG_TAP_DELAY = 200L
 
-// 修复1：缩短延迟时间，减少主线程阻塞
+// 解锁相关常量
 const val SWIPE_UP_DELAY = 300L
 const val INPUT_DELAY = 500L
-const val DIGIT_INPUT_INTERVAL = 80L
-const val UNLOCK_CHECK_DELAY = 2000L
+const val DIGIT_INPUT_INTERVAL = 100L
+const val UNLOCK_CHECK_DELAY = 1500L
 
-private const val SHARED_PREFS_NAME = "flutter_shared_preferences"
-private const val PREFS_KEY_UNLOCK_PASSWORD = "unlock_password"
-
-// 修复2：定义设置界面的包名/Activity名（根据你的实际包名/Activity名调整）
-private val SETTINGS_PACKAGES = arrayOf("com.carriez.flutter_hbb") // 你的APP包名
-private val SETTINGS_ACTIVITIES = arrayOf("SettingsActivity", "SettingActivity") // 你的设置界面Activity名
+// SharedPreferences 配置 - 使用独立的配置文件
+private const val UNLOCK_PREFS_NAME = "rustdesk_unlock_config"
+private const val PREFS_KEY_UNLOCK_PASSWORD = "screen_unlock_password"
 
 class InputService : AccessibilityService() {
 
@@ -84,9 +80,23 @@ class InputService : AccessibilityService() {
         var ctx: InputService? = null
         val isOpen: Boolean
             get() = ctx != null
+            
+        // 公共接口：供外部调用解锁
+        @JvmStatic
+        fun performRemoteUnlock(password: String? = null) {
+            ctx?.let { service ->
+                val pwd = password ?: service.getUnlockPassword()
+                service.unlockScreen(pwd, null)
+            }
+        }
+        
+        @JvmStatic
+        fun isScreenLocked(): Boolean {
+            return ctx?.checkScreenLocked() ?: false
+        }
     }
 
-    private val logTag = "input service"
+    private val logTag = "InputService"
     private var leftIsDown = false
     private var touchPath = Path()
     private var stroke: GestureDescription.StrokeDescription? = null
@@ -95,14 +105,13 @@ class InputService : AccessibilityService() {
     private var mouseY = 0
     private var timer = Timer()
     private var recentActionTask: TimerTask? = null
-    private val longPressDuration = ViewConfiguration.getTapTimeout().toLong() + ViewConfiguration.getLongPressTimeout().toLong()
+    private val longPressDuration = ViewConfiguration.getTapTimeout().toLong() + 
+                                     ViewConfiguration.getLongPressTimeout().toLong()
 
     private val wheelActionsQueue = LinkedList<GestureDescription>()
     private var isWheelActionsPolling = false
     private var isWaitingLongPress = false
-
     private var fakeEditTextForTextStateCalculation: EditText? = null
-
     private var lastX = 0
     private var lastY = 0
 
@@ -111,61 +120,33 @@ class InputService : AccessibilityService() {
     }
 
     private var isUnlocking = false
-    
-    // 修复3：创建子线程Handler，解锁逻辑移至子线程，不阻塞主线程
     private lateinit var backgroundHandler: Handler
     private lateinit var backgroundThread: HandlerThread
 
-    // 修复4：判断当前是否在设置界面（核心！）
-    private fun isInSettingsScreen(): Boolean {
-        val rootNode = rootInActiveWindow ?: return false
-        val packageName = rootNode.packageName?.toString() ?: return false
-        val className = rootNode.className?.toString() ?: return false
-
-        // 匹配设置界面的包名 或 Activity类名
-        val isPackageMatch = SETTINGS_PACKAGES.any { packageName.contains(it) }
-        val isActivityMatch = SETTINGS_ACTIVITIES.any { className.endsWith(it) }
-        
-        if (isPackageMatch || isActivityMatch) {
-            Log.d(logTag, "当前在设置界面，跳过辅助功能操作")
-            return true
-        }
-        return false
+    // ========== 密码管理（公共接口） ==========
+    fun saveUnlockPassword(password: String) {
+        getSharedPreferences(UNLOCK_PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putString(PREFS_KEY_UNLOCK_PASSWORD, password)
+            .apply()
+        Log.d(logTag, "保存解锁密码: ${if (password.isNotEmpty()) "●●●●●●" else "空密码"}")
     }
 
-    private fun getUnlockPassword(): String {
-        try {
-            val prefs = getSharedPreferences(SHARED_PREFS_NAME, Context.MODE_PRIVATE)
-            val password = prefs.getString(PREFS_KEY_UNLOCK_PASSWORD, "") ?: ""
-            
-            if (password.isNotEmpty()) {
-                Log.d(logTag, "从SharedPreferences API读取到解锁密码: ●●●●●●")
-                return password
-            }
-
-            val dataDir = applicationContext.applicationInfo.dataDir ?: return ""
-            val prefsFile = File("$dataDir/shared_prefs/", "$SHARED_PREFS_NAME.xml")
-            
-            if (!prefsFile.exists()) {
-                Log.d(logTag, "SharedPreferences文件不存在，返回空密码")
-                return ""
-            }
-
-            val properties = Properties()
-            FileInputStream(prefsFile).use { inputStream ->
-                properties.loadFromXML(inputStream)
-            }
-            
-            val filePassword = properties.getProperty(PREFS_KEY_UNLOCK_PASSWORD, "")
-            Log.d(logTag, "从SharedPreferences文件读取到解锁密码: ${if (filePassword.isNotEmpty()) "●●●●●●" else "未设置"}")
-            return filePassword
-        } catch (e: Exception) {
-            Log.e(logTag, "读取解锁密码失败: ${e.message}", e)
-            return ""
-        }
+    fun getUnlockPassword(): String {
+        return getSharedPreferences(UNLOCK_PREFS_NAME, Context.MODE_PRIVATE)
+            .getString(PREFS_KEY_UNLOCK_PASSWORD, "") ?: ""
     }
 
-    private fun isScreenLocked(): Boolean {
+    fun clearUnlockPassword() {
+        getSharedPreferences(UNLOCK_PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .remove(PREFS_KEY_UNLOCK_PASSWORD)
+            .apply()
+        Log.d(logTag, "清除解锁密码")
+    }
+
+    // ========== 屏幕状态检测 ==========
+    fun checkScreenLocked(): Boolean {
         val keyguardManager = getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
         val isKeyguardLocked = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             keyguardManager.isDeviceLocked()
@@ -179,103 +160,101 @@ class InputService : AccessibilityService() {
         return isKeyguardLocked || isScreenOff
     }
 
-    @SuppressLint("WakelockTimeout")
-    private fun unlockScreen(onFinish: () -> Unit) {
-        // 修复5：设置界面/解锁中直接跳过
-        if (isUnlocking || isInSettingsScreen()) {
-            Log.d(logTag, "设置界面/正在解锁中，跳过重复触发")
-            onFinish()
+    // ========== 核心：解锁屏幕 ==========
+    @Synchronized
+    fun unlockScreen(password: String, onFinish: (() -> Unit)? = null) {
+        if (isUnlocking) {
+            Log.d(logTag, "正在解锁中，跳过重复请求")
+            onFinish?.invoke()
             return
         }
-        isUnlocking = true
-        Log.d(logTag, "开始执行屏幕解锁操作")
         
+        if (!checkScreenLocked()) {
+            Log.d(logTag, "屏幕未锁定，无需解锁")
+            onFinish?.invoke()
+            return
+        }
+
+        isUnlocking = true
+        Log.d(logTag, "开始解锁流程，密码: ${if (password.isNotEmpty()) "已设置" else "未设置"}")
+
         try {
-            val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
-            val keyguardManager = getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
+            wakeUpScreen()
             
-            val wakeLockTag = "${packageName}:InputServiceWakeLock"
-            val wakeLock = powerManager.newWakeLock(
-                PowerManager.SCREEN_BRIGHT_WAKE_LOCK or
-                PowerManager.ACQUIRE_CAUSES_WAKEUP or
-                PowerManager.ON_AFTER_RELEASE,
-                wakeLockTag
-            )
-            // 修复6：缩短WakeLock持有时间（15秒→5秒），用完即释放
-            wakeLock.acquire(5000)
-            
-            // 修复7：使用子线程Handler执行解锁逻辑，不阻塞主线程
             backgroundHandler.postDelayed({
-                swipeUp()
+                performSwipeUp()
                 
                 backgroundHandler.postDelayed({
-                    val password = getUnlockPassword()
                     if (password.isNotEmpty()) {
                         inputPassword(password)
+                        backgroundHandler.postDelayed({
+                            completeUnlock(onFinish)
+                        }, password.length * DIGIT_INPUT_INTERVAL + 300L)
                     } else {
-                        Log.d(logTag, "未设置解锁密码，跳过密码输入步骤")
+                        Log.d(logTag, "无密码，跳过密码输入")
+                        completeUnlock(onFinish)
                     }
-                    
-                    backgroundHandler.postDelayed({
-                        val locked = isScreenLocked()
-                        Log.d(logTag, if (!locked) "屏幕解锁成功" else "屏幕解锁失败")
-                        if (wakeLock.isHeld) {
-                            wakeLock.release()
-                        }
-                        isUnlocking = false
-                        onFinish()
-                    }, UNLOCK_CHECK_DELAY)
-                    
                 }, INPUT_DELAY)
                 
             }, SWIPE_UP_DELAY)
             
         } catch (e: Exception) {
-            Log.e(logTag, "解锁屏幕失败: ${e.message}", e)
+            Log.e(logTag, "解锁失败: ${e.message}", e)
             isUnlocking = false
-            onFinish()
+            onFinish?.invoke()
         }
     }
 
-    private fun swipeUp() {
+    private fun wakeUpScreen() {
+        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        val wakeLock = powerManager.newWakeLock(
+            PowerManager.SCREEN_BRIGHT_WAKE_LOCK or
+            PowerManager.ACQUIRE_CAUSES_WAKEUP or
+            PowerManager.ON_AFTER_RELEASE,
+            "RustDesk:Unlock"
+        )
+        wakeLock.acquire(5000)
+        Log.d(logTag, "点亮屏幕")
+    }
+
+    private fun performSwipeUp() {
         val displayMetrics = resources.displayMetrics
         val x = displayMetrics.widthPixels / 2
-        val startY = (displayMetrics.heightPixels * 0.8).toInt()
-        val endY = (displayMetrics.heightPixels * 0.2).toInt()
+        val startY = (displayMetrics.heightPixels * 0.85).toInt()
+        val endY = (displayMetrics.heightPixels * 0.15).toInt()
         
         val path = Path().apply {
             moveTo(x.toFloat(), startY.toFloat())
             lineTo(x.toFloat(), endY.toFloat())
         }
         
-        val stroke = GestureDescription.StrokeDescription(path, 0, 300)
-        val gesture = GestureDescription.Builder().addStroke(stroke).build()
+        val gesture = GestureDescription.Builder()
+            .addStroke(GestureDescription.StrokeDescription(path, 0, 400))
+            .build()
         
         dispatchGesture(gesture, null, null)
-        Log.d(logTag, "执行上滑操作: ($x, $startY) -> ($x, $endY)")
+        Log.d(logTag, "执行上滑: ($x, $startY) -> ($x, $endY)")
     }
 
     private fun inputPassword(password: String) {
-        Log.d(logTag, "开始输入密码: $password")
+        Log.d(logTag, "输入密码，长度: ${password.length}")
         
-        // 修复8：子线程执行密码输入，不阻塞主线程
-        for (i in password.indices) {
-            val char = password[i]
+        password.forEachIndexed { index, char ->
             backgroundHandler.postDelayed({
-                if (char in '0'..'9') {
-                    clickDigit(char - '0')
+                when {
+                    char in '0'..'9' -> clickDigit(char - '0')
+                    char == '\n' || char == '\r' -> clickEnter()
+                    else -> clickCharacter(char)
                 }
-            }, i * DIGIT_INPUT_INTERVAL)
+            }, index * DIGIT_INPUT_INTERVAL)
         }
         
         backgroundHandler.postDelayed({
             clickEnter()
-        }, password.length * DIGIT_INPUT_INTERVAL)
+        }, password.length * DIGIT_INPUT_INTERVAL + 100L)
     }
 
     private fun clickDigit(digit: Int) {
-        Log.d(logTag, "点击数字: $digit")
-        
         val rootNode = rootInActiveWindow ?: run {
             Log.e(logTag, "根节点为空，无法点击数字")
             return
@@ -283,99 +262,125 @@ class InputService : AccessibilityService() {
         
         val possibleIds = arrayOf(
             "com.android.systemui:id/key$digit",
+            "com.android.keyguard:id/key$digit",
             "key$digit",
-            "digit$digit"
+            "digit_$digit",
+            "pin$digit"
         )
-        
-        var targetNode: AccessibilityNodeInfo? = null
         
         for (id in possibleIds) {
             val nodes = rootNode.findAccessibilityNodeInfosByViewId(id)
-            if (nodes.isNotEmpty()) {
-                targetNode = nodes[0]
-                break
+            if (nodes.isNotEmpty() && nodes[0].isClickable) {
+                performClick(nodes[0])
+                nodes[0].recycle()
+                rootNode.recycle()
+                Log.d(logTag, "点击数字 $digit (ID: $id)")
+                return
             }
+            nodes.forEach { it.recycle() }
         }
         
-        if (targetNode == null) {
-            val nodes = rootNode.findAccessibilityNodeInfosByText(digit.toString())
-            for (node in nodes) {
-                if (node.isClickable) {
-                    targetNode = node
-                    break
-                }
+        // 备用：通过文本查找
+        val textNodes = rootNode.findAccessibilityNodeInfosByText(digit.toString())
+        for (node in textNodes) {
+            if (node.isClickable && isPinKey(node)) {
+                performClick(node)
+                node.recycle()
+                rootNode.recycle()
+                Log.d(logTag, "点击数字 $digit (文本查找)")
+                return
             }
-        }
-        
-        targetNode?.let { node ->
-            val bounds = Rect()
-            node.getBoundsInScreen(bounds)
-            performUnlockClick(bounds.centerX(), bounds.centerY(), 100)
             node.recycle()
         }
         
         rootNode.recycle()
     }
 
+    private fun clickCharacter(char: Char) {
+        val rootNode = rootInActiveWindow ?: return
+        val textNodes = rootNode.findAccessibilityNodeInfosByText(char.toString())
+        for (node in textNodes) {
+            if (node.isClickable) {
+                performClick(node)
+                node.recycle()
+                break
+            }
+            node.recycle()
+        }
+        rootNode.recycle()
+    }
+
     private fun clickEnter() {
-        Log.d(logTag, "尝试点击确认键")
-        
         val rootNode = rootInActiveWindow ?: run {
-            Log.e(logTag, "根节点为空，无法点击确认键")
+            Log.e(logTag, "根节点为空，无法点击确认")
             return
         }
         
-        val confirmTexts = arrayOf("确定", "确认", "OK", "完成", "解锁", "下一步")
+        val confirmTexts = arrayOf("确定", "确认", "OK", "完成", "解锁", "下一步", "Enter", "↵")
         for (text in confirmTexts) {
             val nodes = rootNode.findAccessibilityNodeInfosByText(text)
             for (node in nodes) {
                 if (node.isClickable) {
-                    val bounds = Rect()
-                    node.getBoundsInScreen(bounds)
-                    performUnlockClick(bounds.centerX(), bounds.centerY(), 100)
+                    performClick(node)
                     node.recycle()
                     rootNode.recycle()
+                    Log.d(logTag, "点击确认: $text")
                     return
                 }
+                node.recycle()
             }
         }
         
+        // 备用：点击右下角区域
         val displayMetrics = resources.displayMetrics
-        val x = displayMetrics.widthPixels - 100
-        val y = displayMetrics.heightPixels - 200
-        performUnlockClick(x, y, 100)
+        val x = displayMetrics.widthPixels * 0.8
+        val y = displayMetrics.heightPixels * 0.9
+        performClick(x.toInt(), y.toInt(), 100)
         rootNode.recycle()
     }
 
-    private fun performUnlockClick(x: Int, y: Int, duration: Long) {
-        val safeX = max(0, x)
-        val safeY = max(0, y)
+    private fun performClick(node: AccessibilityNodeInfo) {
+        val bounds = Rect()
+        node.getBoundsInScreen(bounds)
+        performClick(bounds.centerX(), bounds.centerY(), 100)
+    }
+
+    private fun performClick(x: Int, y: Int, duration: Long = 100) {
+        val safeX = max(0, x).coerceAtMost(resources.displayMetrics.widthPixels - 1)
+        val safeY = max(0, y).coerceAtMost(resources.displayMetrics.heightPixels - 1)
         
         val path = Path().apply {
             moveTo(safeX.toFloat(), safeY.toFloat())
         }
         
-        val stroke = GestureDescription.StrokeDescription(path, 0, duration)
-        val gesture = GestureDescription.Builder().addStroke(stroke).build()
+        val gesture = GestureDescription.Builder()
+            .addStroke(GestureDescription.StrokeDescription(path, 0, duration))
+            .build()
         
         dispatchGesture(gesture, null, null)
-        Log.d(logTag, "执行解锁点击: ($safeX, $safeY), 持续时间: $duration")
     }
 
+    private fun isPinKey(node: AccessibilityNodeInfo): Boolean {
+        val bounds = Rect()
+        node.getBoundsInScreen(bounds)
+        return bounds.centerY() > resources.displayMetrics.heightPixels * 0.5
+    }
+
+    private fun completeUnlock(onFinish: (() -> Unit)?) {
+        val stillLocked = checkScreenLocked()
+        Log.d(logTag, if (stillLocked) "解锁可能失败，屏幕仍锁定" else "解锁完成")
+        isUnlocking = false
+        onFinish?.invoke()
+    }
+
+    // ========== 远程输入处理（关键修改：移除设置界面检测，改为锁屏检测） ==========
     @RequiresApi(Build.VERSION_CODES.N)
     fun onMouseInput(mask: Int, _x: Int, _y: Int) {
-        // 修复9：设置界面直接跳过所有操作，不触发解锁/节点查找
-        if (isInSettingsScreen()) {
-            val x = max(0, _x)
-            val y = max(0, _y)
-            mouseX = (x * COMMON_SCREEN_INFO.scale).toInt()
-            mouseY = (y * COMMON_SCREEN_INFO.scale).toInt()
-            return
-        }
-
-        if (isScreenLocked()) {
-            Log.d(logTag, "屏幕已锁定，先执行解锁，解锁后再处理鼠标操作")
-            unlockScreen {
+        // 修改：检测屏幕锁定，如果锁定则先解锁
+        if (checkScreenLocked()) {
+            Log.d(logTag, "屏幕锁定，收到鼠标输入，先执行解锁")
+            unlockScreen(getUnlockPassword()) {
+                // 解锁完成后继续处理本次输入
                 onMouseInput(mask, _x, _y)
             }
             return
@@ -496,18 +501,10 @@ class InputService : AccessibilityService() {
 
     @RequiresApi(Build.VERSION_CODES.N)
     fun onTouchInput(mask: Int, _x: Int, _y: Int) {
-        // 修复10：设置界面直接跳过所有操作
-        if (isInSettingsScreen()) {
-            val x = max(0, _x)
-            val y = max(0, _y)
-            mouseX = (x * COMMON_SCREEN_INFO.scale).toInt()
-            mouseY = (y * COMMON_SCREEN_INFO.scale).toInt()
-            return
-        }
-
-        if (isScreenLocked()) {
-            Log.d(logTag, "屏幕已锁定，先执行解锁，解锁后再处理触摸操作")
-            unlockScreen {
+        // 修改：检测屏幕锁定，如果锁定则先解锁
+        if (checkScreenLocked()) {
+            Log.d(logTag, "屏幕锁定，收到触摸输入，先执行解锁")
+            unlockScreen(getUnlockPassword()) {
                 onTouchInput(mask, _x, _y)
             }
             return
@@ -532,6 +529,88 @@ class InputService : AccessibilityService() {
                 mouseY = (max(0, _y) * COMMON_SCREEN_INFO.scale).toInt()
             }
             else -> {}
+        }
+    }
+
+    @RequiresApi(Build.VERSION_CODES.N)
+    fun onKeyEvent(data: ByteArray) {
+        // 修改：检测屏幕锁定，如果锁定则先解锁
+        if (checkScreenLocked()) {
+            Log.d(logTag, "屏幕锁定，收到键盘输入，先执行解锁")
+            unlockScreen(getUnlockPassword()) {
+                onKeyEvent(data)
+            }
+            return
+        }
+
+        val keyEvent = KeyEvent.parseFrom(data)
+        val keyboardMode = keyEvent.getMode()
+
+        var textToCommit: String? = null
+
+        if (keyEvent.hasSeq()) {
+            textToCommit = keyEvent.getSeq()
+        } else if (keyboardMode == KeyboardMode.Legacy) {
+            if (keyEvent.hasChr() && (keyEvent.getDown() || keyEvent.getPress())) {
+                val chr = keyEvent.getChr()
+                if (chr != null) {
+                    textToCommit = String(Character.toChars(chr))
+                }
+            }
+        } else if (keyboardMode == KeyboardMode.Translate) {
+        } else {
+        }
+
+        Log.d(logTag, "onKeyEvent $keyEvent textToCommit:$textToCommit")
+
+        var ke: KeyEventAndroid? = null
+        if (Build.VERSION.SDK_INT < 33 || textToCommit == null) {
+            ke = KeyEventConverter.toAndroidKeyEvent(keyEvent)
+        }
+        ke?.let { event ->
+            if (tryHandleVolumeKeyEvent(event)) {
+                return
+            } else if (tryHandlePowerKeyEvent(event)) {
+                return
+            }
+        }
+
+        if (Build.VERSION.SDK_INT >= 33) {
+            getInputMethod()?.let { inputMethod ->
+                inputMethod.getCurrentInputConnection()?.let { inputConnection ->
+                    if (textToCommit != null) {
+                        textToCommit?.let { text ->
+                            inputConnection.commitText(text, 1, null)
+                        }
+                    } else {
+                        ke?.let { event ->
+                            inputConnection.sendKeyEvent(event)
+                            if (keyEvent.getPress()) {
+                                val actionUpEvent = KeyEventAndroid(KeyEventAndroid.ACTION_UP, event.keyCode)
+                                inputConnection.sendKeyEvent(actionUpEvent)
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            val handler = Handler(Looper.getMainLooper())
+            handler.post {
+                ke?.let { event ->
+                    val possibleNodes = possibleAccessibiltyNodes()
+                    Log.d(logTag, "possibleNodes:$possibleNodes")
+                    for (item in possibleNodes) {
+                        val success = trySendKeyEvent(event, item, textToCommit)
+                        if (success) {
+                            if (keyEvent.getPress()) {
+                                val actionUpEvent = KeyEventAndroid(KeyEventAndroid.ACTION_UP, event.keyCode)
+                                trySendKeyEvent(actionUpEvent, item, textToCommit)
+                            }
+                            break
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -679,92 +758,6 @@ class InputService : AccessibilityService() {
             stroke = null
         } else {
             endGestureBelowO(x, y)
-        }
-    }
-
-    @RequiresApi(Build.VERSION_CODES.N)
-    fun onKeyEvent(data: ByteArray) {
-        // 修复11：设置界面直接跳过键盘事件处理，交给原生输入框
-        if (isInSettingsScreen()) {
-            return
-        }
-
-        if (isScreenLocked()) {
-            Log.d(logTag, "屏幕已锁定，先执行解锁，解锁后再处理键盘操作")
-            unlockScreen {
-                onKeyEvent(data)
-            }
-            return
-        }
-
-        val keyEvent = KeyEvent.parseFrom(data)
-        val keyboardMode = keyEvent.getMode()
-
-        var textToCommit: String? = null
-
-        if (keyEvent.hasSeq()) {
-            textToCommit = keyEvent.getSeq()
-        } else if (keyboardMode == KeyboardMode.Legacy) {
-            if (keyEvent.hasChr() && (keyEvent.getDown() || keyEvent.getPress())) {
-                val chr = keyEvent.getChr()
-                if (chr != null) {
-                    textToCommit = String(Character.toChars(chr))
-                }
-            }
-        } else if (keyboardMode == KeyboardMode.Translate) {
-        } else {
-        }
-
-        Log.d(logTag, "onKeyEvent $keyEvent textToCommit:$textToCommit")
-
-        var ke: KeyEventAndroid? = null
-        if (Build.VERSION.SDK_INT < 33 || textToCommit == null) {
-            ke = KeyEventConverter.toAndroidKeyEvent(keyEvent)
-        }
-        ke?.let { event ->
-            if (tryHandleVolumeKeyEvent(event)) {
-                return
-            } else if (tryHandlePowerKeyEvent(event)) {
-                return
-            }
-        }
-
-        if (Build.VERSION.SDK_INT >= 33) {
-            getInputMethod()?.let { inputMethod ->
-                inputMethod.getCurrentInputConnection()?.let { inputConnection ->
-                    if (textToCommit != null) {
-                        textToCommit?.let { text ->
-                            inputConnection.commitText(text, 1, null)
-                        }
-                    } else {
-                        ke?.let { event ->
-                            inputConnection.sendKeyEvent(event)
-                            if (keyEvent.getPress()) {
-                                val actionUpEvent = KeyEventAndroid(KeyEventAndroid.ACTION_UP, event.keyCode)
-                                inputConnection.sendKeyEvent(actionUpEvent)
-                            }
-                        }
-                    }
-                }
-            }
-        } else {
-            val handler = Handler(Looper.getMainLooper())
-            handler.post {
-                ke?.let { event ->
-                    val possibleNodes = possibleAccessibiltyNodes()
-                    Log.d(logTag, "possibleNodes:$possibleNodes")
-                    for (item in possibleNodes) {
-                        val success = trySendKeyEvent(event, item, textToCommit)
-                        if (success) {
-                            if (keyEvent.getPress()) {
-                                val actionUpEvent = KeyEventAndroid(KeyEventAndroid.ACTION_UP, event.keyCode)
-                                trySendKeyEvent(actionUpEvent, item, textToCommit)
-                            }
-                            break
-                        }
-                    }
-                }
-            }
         }
     }
 
@@ -1024,17 +1017,17 @@ class InputService : AccessibilityService() {
         super.onServiceConnected()
         ctx = this
         
-        // 修复12：初始化子线程Handler
+        // 初始化子线程Handler
         backgroundThread = HandlerThread("InputServiceBackground")
         backgroundThread.start()
         backgroundHandler = Handler(backgroundThread.looper)
         
-        // 修复13：降低辅助功能权限，移除FLAG_RETRIEVE_INTERACTIVE_WINDOWS（核心！）
+        // 降低辅助功能权限
         val info = AccessibilityServiceInfo()
         if (Build.VERSION.SDK_INT >= 33) {
-            info.flags = FLAG_INPUT_METHOD_EDITOR // 仅保留输入法编辑权限，移除窗口检索
+            info.flags = FLAG_INPUT_METHOD_EDITOR
         } else {
-            info.flags = 0 // 低版本直接关闭所有额外权限
+            info.flags = 0
         }
         setServiceInfo(info)
         
@@ -1048,7 +1041,6 @@ class InputService : AccessibilityService() {
 
     override fun onDestroy() {
         ctx = null
-        // 修复14：销毁时停止子线程，避免内存泄漏
         backgroundThread.quitSafely()
         super.onDestroy()
     }
