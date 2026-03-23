@@ -17,6 +17,8 @@ import android.content.ClipboardManager
 import android.os.Bundle
 import android.os.Build
 import android.os.IBinder
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import android.view.WindowManager
 import android.media.MediaCodecInfo
@@ -37,6 +39,7 @@ import kotlin.concurrent.thread
 
 class MainActivity : FlutterActivity() {
     companion object {
+        const val CHANNEL = "com.carriez.flutter_hbb/main"
         var flutterMethodChannel: MethodChannel? = null
         private var _rdClipboardManager: RdClipboardManager? = null
         val rdClipboardManager: RdClipboardManager?
@@ -49,6 +52,13 @@ class MainActivity : FlutterActivity() {
 
     private var isAudioStart = false
     private val audioRecordHandle = AudioRecordHandle(this, { false }, { isAudioStart })
+
+    // 心跳检测相关
+    private val handler = Handler(Looper.getMainLooper())
+    private var lastHeartbeatTime = System.currentTimeMillis()
+    private var heartbeatCheckRunnable: Runnable? = null
+    private val HEARTBEAT_TIMEOUT = 15000L // 15秒无心跳视为掉线
+    private val CHECK_INTERVAL = 5000L // 每5秒检查一次
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -69,6 +79,9 @@ class MainActivity : FlutterActivity() {
                 Log.e("MainActivity", "Failed to setCodecInfo: ${e.message}", e)
             }
         }
+        
+        // 启动心跳检测
+        startHeartbeatCheck()
     }
 
     override fun onResume() {
@@ -109,6 +122,8 @@ class MainActivity : FlutterActivity() {
         mainService?.let {
             unbindService(serviceConnection)
         }
+        // 停止心跳检测
+        heartbeatCheckRunnable?.let { handler.removeCallbacks(it) }
         super.onDestroy()
     }
 
@@ -267,6 +282,33 @@ class MainActivity : FlutterActivity() {
                         result.success(null)
                     }
                 }
+                // ========== 新增：锁屏密码相关接口 ==========
+                "save_unlock_password" -> {
+                    val password = call.argument<String>("password") ?: ""
+                    InputService.ctx?.saveUnlockPassword(password)
+                    result.success(true)
+                }
+                "get_unlock_password" -> {
+                    val pwd = InputService.ctx?.getUnlockPassword() ?: ""
+                    result.success(pwd)
+                }
+                "clear_unlock_password" -> {
+                    InputService.ctx?.clearUnlockPassword()
+                    result.success(true)
+                }
+                "check_screen_locked" -> {
+                    result.success(InputService.isScreenLocked())
+                }
+                "manual_unlock" -> {
+                    val pwd = call.argument<String>("password")
+                    InputService.performRemoteUnlock(pwd)
+                    result.success(true)
+                }
+                // ========== 新增：心跳检测接口 ==========
+                "on_heartbeat" -> {
+                    lastHeartbeatTime = System.currentTimeMillis()
+                    result.success(true)
+                }
                 "on_voice_call_started" -> {
                     onVoiceCallStarted()
                 }
@@ -278,6 +320,23 @@ class MainActivity : FlutterActivity() {
                 }
             }
         }
+    }
+
+    // ========== 新增：心跳检测 ==========
+    private fun startHeartbeatCheck() {
+        heartbeatCheckRunnable = Runnable {
+            val now = System.currentTimeMillis()
+            val elapsed = now - lastHeartbeatTime
+            
+            if (elapsed > HEARTBEAT_TIMEOUT) {
+                Log.d(logTag, "心跳超时 ${elapsed}ms，执行自动解锁")
+                // 掉线时自动解锁屏幕
+                InputService.performRemoteUnlock()
+            }
+            
+            handler.postDelayed(heartbeatCheckRunnable!!, CHECK_INTERVAL)
+        }
+        handler.postDelayed(heartbeatCheckRunnable!!, CHECK_INTERVAL)
     }
 
     private fun setCodecInfo() {
