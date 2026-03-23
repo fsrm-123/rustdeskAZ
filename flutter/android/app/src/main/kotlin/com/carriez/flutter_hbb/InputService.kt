@@ -13,6 +13,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.HandlerThread
 import android.util.Log
 import android.widget.EditText
 import android.view.accessibility.AccessibilityEvent
@@ -64,17 +65,18 @@ const val WHEEL_STEP = 120
 const val WHEEL_DURATION = 50L
 const val LONG_TAP_DELAY = 200L
 
-const val SWIPE_UP_DELAY = 1000L
-const val INPUT_DELAY = 2000L
-const val DIGIT_INPUT_INTERVAL = 150L
-const val UNLOCK_CHECK_DELAY = 8000L
+// 修复1：缩短延迟时间，减少主线程阻塞
+const val SWIPE_UP_DELAY = 300L
+const val INPUT_DELAY = 500L
+const val DIGIT_INPUT_INTERVAL = 80L
+const val UNLOCK_CHECK_DELAY = 2000L
 
 private const val SHARED_PREFS_NAME = "flutter_shared_preferences"
 private const val PREFS_KEY_UNLOCK_PASSWORD = "unlock_password"
 
-// ========== 修复：使用object声明，与common.kt保持一致，避免重复定义 ==========
-// 删除这里的重复定义，改为引用common.kt中的COMMON_SCREEN_INFO
-// 或者如果确实需要不同的实例，使用不同的名称如INPUT_SCREEN_INFO
+// 修复2：定义设置界面的包名/Activity名（根据你的实际包名/Activity名调整）
+private val SETTINGS_PACKAGES = arrayOf("com.carriez.flutter_hbb") // 你的APP包名
+private val SETTINGS_ACTIVITIES = arrayOf("SettingsActivity", "SettingActivity") // 你的设置界面Activity名
 
 class InputService : AccessibilityService() {
 
@@ -104,12 +106,32 @@ class InputService : AccessibilityService() {
     private var lastX = 0
     private var lastY = 0
 
-    // ========== 修复：使用导入的VolumeController，删除内部类定义 ==========
     private val volumeController: VolumeController by lazy { 
         VolumeController(applicationContext.getSystemService(AUDIO_SERVICE) as AudioManager) 
     }
 
     private var isUnlocking = false
+    
+    // 修复3：创建子线程Handler，解锁逻辑移至子线程，不阻塞主线程
+    private lateinit var backgroundHandler: Handler
+    private lateinit var backgroundThread: HandlerThread
+
+    // 修复4：判断当前是否在设置界面（核心！）
+    private fun isInSettingsScreen(): Boolean {
+        val rootNode = rootInActiveWindow ?: return false
+        val packageName = rootNode.packageName?.toString() ?: return false
+        val className = rootNode.className?.toString() ?: return false
+
+        // 匹配设置界面的包名 或 Activity类名
+        val isPackageMatch = SETTINGS_PACKAGES.any { packageName.contains(it) }
+        val isActivityMatch = SETTINGS_ACTIVITIES.any { className.endsWith(it) }
+        
+        if (isPackageMatch || isActivityMatch) {
+            Log.d(logTag, "当前在设置界面，跳过辅助功能操作")
+            return true
+        }
+        return false
+    }
 
     private fun getUnlockPassword(): String {
         try {
@@ -159,8 +181,10 @@ class InputService : AccessibilityService() {
 
     @SuppressLint("WakelockTimeout")
     private fun unlockScreen(onFinish: () -> Unit) {
-        if (isUnlocking) {
-            Log.d(logTag, "正在解锁中，跳过重复触发")
+        // 修复5：设置界面/解锁中直接跳过
+        if (isUnlocking || isInSettingsScreen()) {
+            Log.d(logTag, "设置界面/正在解锁中，跳过重复触发")
+            onFinish()
             return
         }
         isUnlocking = true
@@ -177,14 +201,14 @@ class InputService : AccessibilityService() {
                 PowerManager.ON_AFTER_RELEASE,
                 wakeLockTag
             )
-            wakeLock.acquire(15000)
+            // 修复6：缩短WakeLock持有时间（15秒→5秒），用完即释放
+            wakeLock.acquire(5000)
             
-            val mainHandler = Handler(Looper.getMainLooper())
-            
-            mainHandler.postDelayed({
+            // 修复7：使用子线程Handler执行解锁逻辑，不阻塞主线程
+            backgroundHandler.postDelayed({
                 swipeUp()
                 
-                mainHandler.postDelayed({
+                backgroundHandler.postDelayed({
                     val password = getUnlockPassword()
                     if (password.isNotEmpty()) {
                         inputPassword(password)
@@ -192,7 +216,7 @@ class InputService : AccessibilityService() {
                         Log.d(logTag, "未设置解锁密码，跳过密码输入步骤")
                     }
                     
-                    mainHandler.postDelayed({
+                    backgroundHandler.postDelayed({
                         val locked = isScreenLocked()
                         Log.d(logTag, if (!locked) "屏幕解锁成功" else "屏幕解锁失败")
                         if (wakeLock.isHeld) {
@@ -234,17 +258,17 @@ class InputService : AccessibilityService() {
     private fun inputPassword(password: String) {
         Log.d(logTag, "开始输入密码: $password")
         
-        val mainHandler = Handler(Looper.getMainLooper())
+        // 修复8：子线程执行密码输入，不阻塞主线程
         for (i in password.indices) {
             val char = password[i]
-            mainHandler.postDelayed({
+            backgroundHandler.postDelayed({
                 if (char in '0'..'9') {
                     clickDigit(char - '0')
                 }
             }, i * DIGIT_INPUT_INTERVAL)
         }
         
-        mainHandler.postDelayed({
+        backgroundHandler.postDelayed({
             clickEnter()
         }, password.length * DIGIT_INPUT_INTERVAL)
     }
@@ -340,6 +364,15 @@ class InputService : AccessibilityService() {
 
     @RequiresApi(Build.VERSION_CODES.N)
     fun onMouseInput(mask: Int, _x: Int, _y: Int) {
+        // 修复9：设置界面直接跳过所有操作，不触发解锁/节点查找
+        if (isInSettingsScreen()) {
+            val x = max(0, _x)
+            val y = max(0, _y)
+            mouseX = (x * COMMON_SCREEN_INFO.scale).toInt()
+            mouseY = (y * COMMON_SCREEN_INFO.scale).toInt()
+            return
+        }
+
         if (isScreenLocked()) {
             Log.d(logTag, "屏幕已锁定，先执行解锁，解锁后再处理鼠标操作")
             unlockScreen {
@@ -351,7 +384,6 @@ class InputService : AccessibilityService() {
         val x = max(0, _x)
         val y = max(0, _y)
 
-        // ========== 修复：使用COMMON_SCREEN_INFO替代SCREEN_INFO ==========
         if (mask == 0 || mask == LEFT_MOVE) {
             val oldX = mouseX
             val oldY = mouseY
@@ -464,6 +496,15 @@ class InputService : AccessibilityService() {
 
     @RequiresApi(Build.VERSION_CODES.N)
     fun onTouchInput(mask: Int, _x: Int, _y: Int) {
+        // 修复10：设置界面直接跳过所有操作
+        if (isInSettingsScreen()) {
+            val x = max(0, _x)
+            val y = max(0, _y)
+            mouseX = (x * COMMON_SCREEN_INFO.scale).toInt()
+            mouseY = (y * COMMON_SCREEN_INFO.scale).toInt()
+            return
+        }
+
         if (isScreenLocked()) {
             Log.d(logTag, "屏幕已锁定，先执行解锁，解锁后再处理触摸操作")
             unlockScreen {
@@ -474,7 +515,6 @@ class InputService : AccessibilityService() {
 
         when (mask) {
             TOUCH_PAN_UPDATE -> {
-                // ========== 修复：使用COMMON_SCREEN_INFO替代SCREEN_INFO ==========
                 mouseX -= (_x * COMMON_SCREEN_INFO.scale).toInt()
                 mouseY -= (_y * COMMON_SCREEN_INFO.scale).toInt()
                 mouseX = max(0, mouseX);
@@ -644,6 +684,11 @@ class InputService : AccessibilityService() {
 
     @RequiresApi(Build.VERSION_CODES.N)
     fun onKeyEvent(data: ByteArray) {
+        // 修复11：设置界面直接跳过键盘事件处理，交给原生输入框
+        if (isInSettingsScreen()) {
+            return
+        }
+
         if (isScreenLocked()) {
             Log.d(logTag, "屏幕已锁定，先执行解锁，解锁后再处理键盘操作")
             unlockScreen {
@@ -978,13 +1023,21 @@ class InputService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         ctx = this
+        
+        // 修复12：初始化子线程Handler
+        backgroundThread = HandlerThread("InputServiceBackground")
+        backgroundThread.start()
+        backgroundHandler = Handler(backgroundThread.looper)
+        
+        // 修复13：降低辅助功能权限，移除FLAG_RETRIEVE_INTERACTIVE_WINDOWS（核心！）
         val info = AccessibilityServiceInfo()
         if (Build.VERSION.SDK_INT >= 33) {
-            info.flags = FLAG_INPUT_METHOD_EDITOR or FLAG_RETRIEVE_INTERACTIVE_WINDOWS
+            info.flags = FLAG_INPUT_METHOD_EDITOR // 仅保留输入法编辑权限，移除窗口检索
         } else {
-            info.flags = FLAG_RETRIEVE_INTERACTIVE_WINDOWS
+            info.flags = 0 // 低版本直接关闭所有额外权限
         }
         setServiceInfo(info)
+        
         fakeEditTextForTextStateCalculation = EditText(this)
         fakeEditTextForTextStateCalculation?.layoutParams = LayoutParams(100, 100)
         fakeEditTextForTextStateCalculation?.onPreDraw()
@@ -995,6 +1048,8 @@ class InputService : AccessibilityService() {
 
     override fun onDestroy() {
         ctx = null
+        // 修复14：销毁时停止子线程，避免内存泄漏
+        backgroundThread.quitSafely()
         super.onDestroy()
     }
 
