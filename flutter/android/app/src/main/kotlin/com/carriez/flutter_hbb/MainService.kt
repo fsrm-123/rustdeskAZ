@@ -285,13 +285,14 @@ class MainService : Service() {
             h = max
         }
         Log.d(logTag,"updateScreenInfo:w:$w,h:$h")
-        var scale = 1
+        // ========== 修复：scale 改为 Float 类型 ==========
+        var scale = 1.0f
         if (w != 0 && h != 0) {
             if (isHalfScale == true && (w > MAX_SCREEN_SIZE || h > MAX_SCREEN_SIZE)) {
-                scale = 2
-                w /= scale
-                h /= scale
-                dpi /= scale
+                scale = 2.0f
+                w = (w / scale).toInt()
+                h = (h / scale).toInt()
+                dpi = (dpi / scale).toInt()
             }
             if (COMMON_SCREEN_INFO.width != w) {
                 COMMON_SCREEN_INFO.width = w
