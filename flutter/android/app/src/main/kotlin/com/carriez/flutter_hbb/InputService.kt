@@ -73,9 +73,10 @@ const val INPUT_DELAY = 500L
 const val DIGIT_INPUT_INTERVAL = 100L
 const val UNLOCK_CHECK_DELAY = 1500L
 
-// SharedPreferences 配置
-private const val UNLOCK_PREFS_NAME = "rustdesk_unlock_config"
-private const val PREFS_KEY_UNLOCK_PASSWORD = "screen_unlock_password"
+// SharedPreferences 配置 - 必须与 MainActivity.kt 保持一致！
+// 改为 public const val，供 MainActivity 引用（可选，也可以两边各自定义相同字符串）
+const val UNLOCK_PREFS_NAME = "rustdesk_unlock_config"
+const val PREFS_KEY_UNLOCK_PASSWORD = "screen_unlock_password"
 
 class InputService : AccessibilityService() {
 
