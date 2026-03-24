@@ -273,42 +273,34 @@ class MainActivity : FlutterActivity() {
                 }
                 "on_voice_call_started" -> {
                     onVoiceCallStarted()
+                    result.success(true)
                 }
                 "on_voice_call_closed" -> {
                     onVoiceCallClosed()
+                    result.success(true)
                 }
-                // 密码输入框相关方法
+                // ====================== 密码解锁方法（稳定兼容版） ======================
                 "save_unlock_password" -> {
-                    if (call.arguments is Map<*, *>) {
-                        val args = call.arguments as Map<*, *>
-                        val password = args["password"] as? String ?: ""
-                        
-                        try {
-                            // 使用 Application Context 确保全局可访问
-                            val prefs = applicationContext.getSharedPreferences(UNLOCK_PREFS_NAME, Context.MODE_PRIVATE)
-                            prefs.edit().putString(PREFS_KEY_UNLOCK_PASSWORD, password).apply()
-                            
-                            Log.d(logTag, "密码已保存，长度: ${password.length}")
-                            result.success(true)
-                        } catch (e: Exception) {
-                            Log.e(logTag, "保存密码失败: ${e.message}", e)
-                            result.error("-1", "保存密码失败: ${e.message}", null)
-                        }
-                    } else {
-                        result.error("-1", "参数格式错误", null)
+                    val password = call.argument<String>("password") ?: ""
+                    try {
+                        val sp = applicationContext.getSharedPreferences(UNLOCK_PREFS_NAME, Context.MODE_PRIVATE)
+                        sp.edit().putString(PREFS_KEY_UNLOCK_PASSWORD, password).apply()
+                        Log.d(logTag, "保存解锁密码成功，长度：${password.length}")
+                        result.success(true)
+                    } catch (e: Exception) {
+                        Log.e(logTag, "保存密码失败", e)
+                        result.error("1", "保存失败", e.message)
                     }
                 }
                 "get_unlock_password" -> {
                     try {
-                        // 使用 Application Context 确保全局可访问
-                        val prefs = applicationContext.getSharedPreferences(UNLOCK_PREFS_NAME, Context.MODE_PRIVATE)
-                        val password = prefs.getString(PREFS_KEY_UNLOCK_PASSWORD, "") ?: ""
-                        
-                        Log.d(logTag, "密码已读取: ${if (password.isNotEmpty()) "已设置" else "未设置"}")
-                        result.success(password)
+                        val sp = applicationContext.getSharedPreferences(UNLOCK_PREFS_NAME, Context.MODE_PRIVATE)
+                        val pwd = sp.getString(PREFS_KEY_UNLOCK_PASSWORD, "") ?: ""
+                        Log.d(logTag, "读取解锁密码成功，已设置：${pwd.isNotEmpty()}")
+                        result.success(pwd)
                     } catch (e: Exception) {
-                        Log.e(logTag, "读取密码失败: ${e.message}", e)
-                        result.error("-1", "读取密码失败: ${e.message}", null)
+                        Log.e(logTag, "读取密码失败", e)
+                        result.error("1", "读取失败", e.message)
                     }
                 }
                 else -> {
