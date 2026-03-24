@@ -102,9 +102,9 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
   var _allowAskForNoteAtEndOfConnection = false;
   var _preventSleepWhileConnected = true;
 
-  // 密码状态
+  // 密码状态（确保初始化后立即加载）
   String _currentPassword = "";
-  // 移除类级别的密码控制器，改为每次对话框创建新的
+  bool _isPasswordLoading = true; // 增加加载状态
 
   _SettingsState() {
     _enableAbr = option2bool(
@@ -156,10 +156,11 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
 
-    // 在首帧渲染后加载密码
+    // 立即加载密码（不等待首帧）
+    _loadPassword();
+
+    // 原有初始化逻辑
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      await _loadPassword();
-      
       var update = false;
 
       if (_hasIgnoreBattery) {
@@ -234,13 +235,22 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
     });
   }
 
-  // 从原生层加载密码
+  // 修复：立即加载密码，确保同步更新UI
   Future<void> _loadPassword() async {
     try {
-      final pwd = await gFFI.invokeMethod('get_unlock_password') as String? ?? '';
+      // 标记加载中
+      setState(() {
+        _isPasswordLoading = true;
+      });
+      
+      // 同步调用原生方法（确保获取到密码）
+      final result = await gFFI.invokeMethod('get_unlock_password');
+      final pwd = result as String? ?? '';
+      
       if (mounted) {
         setState(() {
           _currentPassword = pwd;
+          _isPasswordLoading = false;
         });
         debugPrint("密码加载成功: ${pwd.isNotEmpty ? "已设置(${pwd.length}位)" : "未设置"}");
       }
@@ -249,31 +259,41 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
       if (mounted) {
         setState(() {
           _currentPassword = "";
+          _isPasswordLoading = false;
         });
       }
     }
   }
 
-  // 直接保存指定密码
+  // 修复：直接保存指定密码（确保同步更新状态）
   Future<void> _savePasswordDirect(String newPwd) async {
     try {
+      // 先更新UI状态（即时反馈）
+      setState(() {
+        _currentPassword = newPwd;
+      });
+      
+      // 调用原生保存
       final success = await gFFI.invokeMethod('save_unlock_password', {
         'password': newPwd,
       });
       
       if (success == true) {
-        if (mounted) {
-          setState(() {
-            _currentPassword = newPwd;
-          });
-        }
         showToast(newPwd.isNotEmpty ? "密码保存成功" : "密码已清空");
         debugPrint("密码保存成功，长度: ${newPwd.length}");
       } else {
+        // 保存失败回滚状态
+        setState(() {
+          _loadPassword(); // 重新加载原密码
+        });
         showToast("密码保存失败");
         debugPrint("密码保存失败: 返回false");
       }
     } catch (e) {
+      // 异常回滚状态
+      setState(() {
+        _loadPassword(); // 重新加载原密码
+      });
       showToast("保存出错: ${e.toString().substring(0, 50)}");
       debugPrint("保存密码异常: $e");
     }
@@ -292,9 +312,9 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
         final ibs = await checkAndUpdateIgnoreBatteryStatus();
         final sob = await checkAndUpdateStartOnBoot();
         if (ibs || sob) {
-          if (mounted) setState(() {});
+          setState(() {});
         }
-        // 恢复页面时重新加载密码
+        // 恢复页面时强制重新加载密码
         await _loadPassword();
       }();
     }
@@ -314,13 +334,21 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
   Future<bool> checkAndUpdateStartOnBoot() async {
     if (!await canStartOnBoot() && _enableStartOnBoot) {
       _enableStartOnBoot = false;
-      debugPrint(
-          "checkAndUpdateStartOnBoot and set _enableStartOnBoot -> false");
       gFFI.invokeMethod(AndroidChannel.kSetStartOnBootOpt, false);
       return true;
     } else {
       return false;
     }
+  }
+
+  Future<bool> canStartOnBoot() async {
+    if (_hasIgnoreBattery && !_ignoreBatteryOpt) {
+      return false;
+    }
+    if (!await AndroidPermissionManager.check(kSystemAlertWindow)) {
+      return false;
+    }
+    return true;
   }
 
   @override
@@ -575,22 +603,28 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
       )
     ];
 
-    // 密码输入框设置项 - 每次点击创建新的对话框和控制器
+    // 修复：密码输入框设置项（确保明文显示且状态同步）
     final List<AbstractSettingsTile> passwordTiles = [
       SettingsTile(
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text('屏幕解锁密码'),
-            Text(
-              _currentPassword.isNotEmpty 
-                  ? '已设置: $_currentPassword'  // 显示明文密码方便核对
-                  : '未设置密码',
-              style: TextStyle(
-                fontSize: 12,
-                color: _currentPassword.isNotEmpty ? Colors.green : Colors.grey,
+            if (_isPasswordLoading)
+              Text(
+                '加载中...',
+                style: TextStyle(fontSize: 12, color: Colors.grey),
+              )
+            else
+              Text(
+                _currentPassword.isNotEmpty 
+                    ? '已设置: $_currentPassword'  // 显示明文（按要求）
+                    : '未设置密码',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: _currentPassword.isNotEmpty ? Colors.green : Colors.grey,
+                ),
               ),
-            ),
           ],
         ),
         leading: Icon(Icons.lock_outline, color: Colors.blueGrey),
@@ -1136,16 +1170,6 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
       ],
     );
     return settings;
-  }
-
-  Future<bool> canStartOnBoot() async {
-    if (_hasIgnoreBattery && !_ignoreBatteryOpt) {
-      return false;
-    }
-    if (!await AndroidPermissionManager.check(kSystemAlertWindow)) {
-      return false;
-    }
-    return true;
   }
 
   defaultDisplaySection() {
