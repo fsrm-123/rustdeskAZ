@@ -35,8 +35,6 @@ import android.annotation.SuppressLint
 import java.util.*
 import java.lang.Character
 import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.locks.ReentrantLock
-import kotlin.concurrent.withLock
 import kotlin.math.abs
 import kotlin.math.max
 import hbb.MessageOuterClass.KeyEvent
@@ -64,11 +62,12 @@ const val WHEEL_STEP = 120
 const val WHEEL_DURATION = 50L
 const val LONG_TAP_DELAY = 200L
 
-// 解锁相关常量
-const val SWIPE_UP_DELAY = 300L
-const val INPUT_DELAY = 500L
-const val DIGIT_INPUT_INTERVAL = 120L  // 微调保证顺序
-const val UNLOCK_COOLDOWN_MS = 15000L // 15秒冷却期
+// ======================== 修改：参考 Java 代码的解锁时序 ========================
+// Java 代码参数：亮屏后 1000ms 上滑，上滑后 2000ms 输密码，密码间隔 150ms
+const val WAKEUP_DELAY_MS = 1000L        // 亮屏后等待时间（原 300L）
+const val SWIPE_UP_DELAY_MS = 2000L      // 上滑后等待密码界面时间（原 500L）
+const val DIGIT_INPUT_INTERVAL_MS = 150L // 密码数字输入间隔（原 120L）
+const val UNLOCK_COOLDOWN_MS = 15000L    // 15秒冷却期
 
 // SharedPreferences 配置 - 与 MainActivity.kt 保持一致
 const val UNLOCK_PREFS_NAME = "rustdesk_unlock_config"
@@ -118,11 +117,6 @@ class InputService : AccessibilityService() {
     private lateinit var backgroundHandler: Handler
     private lateinit var backgroundThread: HandlerThread
 
-    // ======================== 修复核心：手势执行锁 ========================
-    private val gestureLock = ReentrantLock()
-    private val gestureCondition = gestureLock.newCondition()
-    private var isGestureExecuting = false
-
     // 从本地读取密码
     private fun getUnlockPassword(): String {
         return try {
@@ -164,6 +158,7 @@ class InputService : AccessibilityService() {
         return false
     }
 
+    // ======================== 修改：参考 Java 代码的解锁流程 ========================
     // 尝试解锁屏幕（带冷却期管理）
     private fun tryUnlockScreen(): Boolean {
         // 屏幕已解锁，无需操作
@@ -189,7 +184,7 @@ class InputService : AccessibilityService() {
         val password = getUnlockPassword()
         Log.d(logTag, "开始解锁，密码长度: ${password.length}")
         
-        // 在后台线程执行解锁
+        // 在后台线程执行解锁（关键：使用后台线程顺序执行，类似 Java 代码）
         backgroundHandler.post {
             try {
                 performUnlock(password)
@@ -208,25 +203,50 @@ class InputService : AccessibilityService() {
         return true
     }
 
-    // 执行解锁操作
+    // ======================== 修改：参考 Java 代码的执行逻辑 ========================
+    // 执行解锁操作 - 使用 SystemClock.sleep 实现阻塞式延迟（关键修改）
     private fun performUnlock(password: String) {
         try {
+            // 1. 点亮屏幕
             wakeUpScreen()
-            Thread.sleep(SWIPE_UP_DELAY)
+            // 关键：使用 SystemClock.sleep 阻塞线程，确保屏幕亮起
+            SystemClock.sleep(WAKEUP_DELAY_MS)
             
+            // 2. 执行上滑
             performSwipeUp()
-            Thread.sleep(INPUT_DELAY)
+            // 关键：等待密码界面出现（Java 代码中是 2000ms）
+            SystemClock.sleep(SWIPE_UP_DELAY_MS)
             
+            // 3. 输入密码
             if (password.isNotEmpty()) {
                 Log.d(logTag, "输入密码...")
-                inputPassword(password)
-                // 等待密码输入完成
-                Thread.sleep(password.length * DIGIT_INPUT_INTERVAL + 500L)
+                for (char in password) {
+                    when {
+                        char in '0'..'9' -> {
+                            clickDigit(char - '0')
+                            // 关键：密码数字间隔 150ms
+                            SystemClock.sleep(DIGIT_INPUT_INTERVAL_MS)
+                        }
+                        char == '\n' || char == '\r' -> {
+                            clickEnter()
+                            SystemClock.sleep(200)
+                        }
+                        else -> {
+                            clickCharacter(char)
+                            SystemClock.sleep(DIGIT_INPUT_INTERVAL_MS)
+                        }
+                    }
+                }
+                // 最后按确认
+                SystemClock.sleep(200)
+                clickEnter()
             } else {
                 Log.d(logTag, "无密码，等待界面响应")
-                Thread.sleep(1000L)
+                SystemClock.sleep(1000L)
             }
             
+            // 4. 检查解锁结果
+            SystemClock.sleep(500)
             val stillLocked = checkScreenLocked()
             if (stillLocked) {
                 Log.w(logTag, "解锁后屏幕仍锁定")
@@ -248,93 +268,41 @@ class InputService : AccessibilityService() {
             PowerManager.ON_AFTER_RELEASE,
             "RustDesk:Unlock"
         )
-        wakeLock.acquire(5000)
-        Log.d(logTag, "点亮屏幕")
+        wakeLock.acquire(15000) // 保持15秒，与 Java 代码一致
+        Log.d(logTag, "点亮屏幕，等待 ${WAKEUP_DELAY_MS}ms")
     }
 
     private fun performSwipeUp() {
         val displayMetrics = resources.displayMetrics
         val x = displayMetrics.widthPixels / 2
-        val startY = (displayMetrics.heightPixels * 0.85).toInt()
-        val endY = (displayMetrics.heightPixels * 0.15).toInt()
+        // 与 Java 代码一致：从 80% 位置滑到 20% 位置
+        val startY = (displayMetrics.heightPixels * 0.8).toInt()
+        val endY = (displayMetrics.heightPixels * 0.2).toInt()
         
         val path = Path().apply {
             moveTo(x.toFloat(), startY.toFloat())
             lineTo(x.toFloat(), endY.toFloat())
         }
         
+        // 与 Java 代码一致：300ms 滑动时间
         val gesture = GestureDescription.Builder()
-            .addStroke(GestureDescription.StrokeDescription(path, 0, 400))
+            .addStroke(GestureDescription.StrokeDescription(path, 0, 300))
             .build()
         
         dispatchGesture(gesture, null, null)
-        Log.d(logTag, "执行上滑解锁")
+        Log.d(logTag, "执行上滑解锁，等待 ${SWIPE_UP_DELAY_MS}ms 让密码界面出现")
     }
 
-    // ======================== 修复：密码输入 100% 顺序正确 ========================
-    private fun inputPassword(password: String) {
-        Log.d(logTag, "输入密码，长度: ${password.length}")
-        
-        val mainHandler = Handler(Looper.getMainLooper())
-        var delay = 0L
-
-        password.forEachIndexed { index, char ->
-            mainHandler.postDelayed({
-                // 等待上一个手势完成
-                gestureLock.withLock {
-                    while (isGestureExecuting) {
-                        gestureCondition.await()
-                    }
-                    isGestureExecuting = true
-                }
-
-                try {
-                    when {
-                        char in '0'..'9' -> clickDigit(char - '0')
-                        char == '\n' || char == '\r' -> clickEnter()
-                        else -> clickCharacter(char)
-                    }
-                } finally {
-                    // 释放锁，允许下一个点击
-                    gestureLock.withLock {
-                        isGestureExecuting = false
-                        gestureCondition.signalAll()
-                    }
-                }
-
-            }, delay)
-            delay += DIGIT_INPUT_INTERVAL
-        }
-
-        // 最后按确认
-        mainHandler.postDelayed({
-            gestureLock.withLock {
-                while (isGestureExecuting) {
-                    gestureCondition.await()
-                }
-                isGestureExecuting = true
-            }
-            try {
-                clickEnter()
-            } finally {
-                gestureLock.withLock {
-                    isGestureExecuting = false
-                    gestureCondition.signalAll()
-                }
-            }
-        }, delay + 150)
-    }
-
+    // ======================== 修改：简化密码输入，移除复杂锁机制 ========================
+    // 点击数字 - 参考 Java 代码的 clickDigit 逻辑
     private fun clickDigit(digit: Int) {
+        Log.d(logTag, "点击数字: $digit")
         val rootNode = rootInActiveWindow ?: run {
-            Log.e(logTag, "根节点为空，无法点击数字")
-            gestureLock.withLock {
-                isGestureExecuting = false
-                gestureCondition.signalAll()
-            }
+            Log.e(logTag, "根节点为空，无法点击数字 $digit")
             return
         }
         
+        // 可能的 ID 列表（与 Java 代码一致）
         val possibleIds = arrayOf(
             "com.android.systemui:id/key$digit",
             "com.android.keyguard:id/key$digit",
@@ -344,6 +312,7 @@ class InputService : AccessibilityService() {
         )
         
         var clicked = false
+        // 方法1：通过 View ID 查找
         for (id in possibleIds) {
             val nodes = rootNode.findAccessibilityNodeInfosByViewId(id)
             if (nodes.isNotEmpty() && nodes[0].isClickable) {
@@ -355,6 +324,7 @@ class InputService : AccessibilityService() {
             nodes.forEach { it.recycle() }
         }
         
+        // 方法2：通过文本查找（数字按钮通常显示为 "0", "1" 等）
         if (!clicked) {
             val textNodes = rootNode.findAccessibilityNodeInfosByText(digit.toString())
             for (node in textNodes) {
@@ -369,17 +339,38 @@ class InputService : AccessibilityService() {
         }
         
         rootNode.recycle()
-        Log.d(logTag, if (clicked) "点击数字 $digit 成功" else "未找到数字 $digit 按钮")
+        if (!clicked) {
+            Log.w(logTag, "未找到数字 $digit 按钮，尝试坐标点击")
+            // 备选：使用坐标点击数字键盘区域（屏幕下半部分）
+            fallbackDigitClick(digit)
+        }
+    }
+
+    // 备选方案：坐标点击数字（当找不到节点时使用）
+    private fun fallbackDigitClick(digit: Int) {
+        val displayMetrics = resources.displayMetrics
+        val width = displayMetrics.widthPixels
+        val height = displayMetrics.heightPixels
+        
+        // 数字键盘通常在屏幕下半部分，3x3 网格
+        // 简单估算数字位置（需要根据实际设备调整）
+        val col = digit % 3
+        val row = digit / 3
+        val x = width * (0.25 + col * 0.25)
+        val y = height * (0.6 + row * 0.1)
+        
+        performClickRaw(x.toInt(), y.toInt(), 100)
+    }
+
+    // 判断是否为 PIN 键盘按键（在屏幕下半部分）
+    private fun isPinKey(node: AccessibilityNodeInfo): Boolean {
+        val bounds = Rect()
+        node.getBoundsInScreen(bounds)
+        return bounds.centerY() > resources.displayMetrics.heightPixels * 0.5
     }
 
     private fun clickCharacter(char: Char) {
-        val rootNode = rootInActiveWindow ?: run {
-            gestureLock.withLock {
-                isGestureExecuting = false
-                gestureCondition.signalAll()
-            }
-            return
-        }
+        val rootNode = rootInActiveWindow ?: return
         
         var clicked = false
         val textNodes = rootNode.findAccessibilityNodeInfosByText(char.toString())
@@ -394,22 +385,21 @@ class InputService : AccessibilityService() {
         }
         
         rootNode.recycle()
-        Log.d(logTag, if (clicked) "点击字符 $char 成功" else "未找到字符 $char 按钮")
+        if (!clicked) {
+            Log.w(logTag, "未找到字符 $char 按钮")
+        }
     }
 
     private fun clickEnter() {
         val rootNode = rootInActiveWindow ?: run {
             Log.e(logTag, "根节点为空，无法点击确认")
-            gestureLock.withLock {
-                isGestureExecuting = false
-                gestureCondition.signalAll()
-            }
             return
         }
         
-        val confirmTexts = arrayOf("确定", "确认", "OK", "完成", "解锁", "下一步", "Enter", "↵")
+        val confirmTexts = arrayOf("确定", "确认", "OK", "完成", "解锁", "下一步", "Enter", "↵", "✓", "✔")
         var clicked = false
         
+        // 方法1：查找确认按钮文本
         for (text in confirmTexts) {
             val nodes = rootNode.findAccessibilityNodeInfosByText(text)
             for (node in nodes) {
@@ -424,15 +414,39 @@ class InputService : AccessibilityService() {
             if (clicked) break
         }
         
+        // 方法2：通过 ID 查找常见确认按钮
+        if (!clicked) {
+            val enterIds = arrayOf(
+                "com.android.systemui:id/key_enter",
+                "com.android.keyguard:id/key_enter",
+                "key_enter",
+                "id/key_enter",
+                "enter"
+            )
+            for (id in enterIds) {
+                val nodes = rootNode.findAccessibilityNodeInfosByViewId(id)
+                if (nodes.isNotEmpty() && nodes[0].isClickable) {
+                    performClick(nodes[0])
+                    nodes[0].recycle()
+                    clicked = true
+                    break
+                }
+                nodes.forEach { it.recycle() }
+            }
+        }
+        
+        // 方法3：坐标点击（右下角区域通常是确认按钮）
         if (!clicked) {
             val displayMetrics = resources.displayMetrics
             val x = (displayMetrics.widthPixels * 0.8).toInt()
             val y = (displayMetrics.heightPixels * 0.9).toInt()
             performClickRaw(x, y, 100)
+            Log.d(logTag, "使用坐标点击确认 ($x, $y)")
+        } else {
+            Log.d(logTag, "点击确认成功")
         }
         
         rootNode.recycle()
-        Log.d(logTag, if (clicked) "点击确认成功" else "使用坐标点击确认")
     }
 
     private fun performClick(node: AccessibilityNodeInfo) {
@@ -454,12 +468,6 @@ class InputService : AccessibilityService() {
             .build()
         
         dispatchGesture(gesture, null, null)
-    }
-
-    private fun isPinKey(node: AccessibilityNodeInfo): Boolean {
-        val bounds = Rect()
-        node.getBoundsInScreen(bounds)
-        return bounds.centerY() > resources.displayMetrics.heightPixels * 0.5
     }
 
     // 远程输入处理（点击事件触发解锁）
