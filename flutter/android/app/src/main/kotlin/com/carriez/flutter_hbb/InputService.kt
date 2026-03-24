@@ -981,7 +981,7 @@ class InputService : AccessibilityService() {
             if (isShowingHint) {
                 this.fakeEditTextForTextStateCalculation?.setText(null)
             } else {
-                this设备.fakeEditTextForTextStateCalculation?.setText(text)
+                this.fakeEditTextForTextStateCalculation?.setText(text)
             }
             if (textSelectionStart != -1 && textSelectionEnd != -1) {
                 this.fakeEditTextForTextStateCalculation?.setSelection(
