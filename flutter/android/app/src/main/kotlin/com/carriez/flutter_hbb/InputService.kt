@@ -67,7 +67,7 @@ const val LONG_TAP_DELAY = 200L
 // 解锁相关常量
 const val SWIPE_UP_DELAY = 300L
 const val INPUT_DELAY = 500L
-const val DIGIT_INPUT_INTERVAL = 100L
+const val DIGIT_INPUT_INTERVAL = 120L  // 微调保证顺序
 const val UNLOCK_COOLDOWN_MS = 15000L // 15秒冷却期
 
 // SharedPreferences 配置 - 与 MainActivity.kt 保持一致
@@ -117,6 +117,11 @@ class InputService : AccessibilityService() {
 
     private lateinit var backgroundHandler: Handler
     private lateinit var backgroundThread: HandlerThread
+
+    // ======================== 修复核心：手势执行锁 ========================
+    private val gestureLock = ReentrantLock()
+    private val gestureCondition = gestureLock.newCondition()
+    private var isGestureExecuting = false
 
     // 从本地读取密码
     private fun getUnlockPassword(): String {
@@ -266,112 +271,168 @@ class InputService : AccessibilityService() {
         Log.d(logTag, "执行上滑解锁")
     }
 
-    // 同步输入密码（确保顺序执行）
+    // ======================== 修复：密码输入 100% 顺序正确 ========================
     private fun inputPassword(password: String) {
         Log.d(logTag, "输入密码，长度: ${password.length}")
         
-        // 使用同步方式输入，确保每个字符都完成
+        val mainHandler = Handler(Looper.getMainLooper())
+        var delay = 0L
+
         password.forEachIndexed { index, char ->
-            val delay = index * DIGIT_INPUT_INTERVAL
-            // 使用 Thread.sleep 同步延迟，确保时序准确
-            SystemClock.sleep(delay)
-            
-            when {
-                char in '0'..'9' -> clickDigit(char - '0')
-                char == '\n' || char == '\r' -> clickEnter()
-                else -> clickCharacter(char)
-            }
-            
-            // 每个字符输入后短暂停顿
-            SystemClock.sleep(50)
+            mainHandler.postDelayed({
+                // 等待上一个手势完成
+                gestureLock.withLock {
+                    while (isGestureExecuting) {
+                        gestureCondition.await()
+                    }
+                    isGestureExecuting = true
+                }
+
+                try {
+                    when {
+                        char in '0'..'9' -> clickDigit(char - '0')
+                        char == '\n' || char == '\r' -> clickEnter()
+                        else -> clickCharacter(char)
+                    }
+                } finally {
+                    // 释放锁，允许下一个点击
+                    gestureLock.withLock {
+                        isGestureExecuting = false
+                        gestureCondition.signalAll()
+                    }
+                }
+
+            }, delay)
+            delay += DIGIT_INPUT_INTERVAL
         }
-        
-        SystemClock.sleep(100)
-        clickEnter()
+
+        // 最后按确认
+        mainHandler.postDelayed({
+            gestureLock.withLock {
+                while (isGestureExecuting) {
+                    gestureCondition.await()
+                }
+                isGestureExecuting = true
+            }
+            try {
+                clickEnter()
+            } finally {
+                gestureLock.withLock {
+                    isGestureExecuting = false
+                    gestureCondition.signalAll()
+                }
+            }
+        }, delay + 150)
     }
 
     private fun clickDigit(digit: Int) {
         val rootNode = rootInActiveWindow ?: run {
             Log.e(logTag, "根节点为空，无法点击数字")
+            gestureLock.withLock {
+                isGestureExecuting = false
+                gestureCondition.signalAll()
+            }
             return
         }
         
         val possibleIds = arrayOf(
             "com.android.systemui:id/key$digit",
-            "com.android.keyguard:id:key$digit",
+            "com.android.keyguard:id/key$digit",
             "key$digit",
             "digit_$digit",
             "pin$digit"
         )
         
+        var clicked = false
         for (id in possibleIds) {
             val nodes = rootNode.findAccessibilityNodeInfosByViewId(id)
             if (nodes.isNotEmpty() && nodes[0].isClickable) {
                 performClick(nodes[0])
                 nodes[0].recycle()
-                rootNode.recycle()
-                Log.d(logTag, "点击数字 $digit")
-                return
+                clicked = true
+                break
             }
             nodes.forEach { it.recycle() }
         }
         
-        val textNodes = rootNode.findAccessibilityNodeInfosByText(digit.toString())
-        for (node in textNodes) {
-            if (node.isClickable && isPinKey(node)) {
-                performClick(node)
+        if (!clicked) {
+            val textNodes = rootNode.findAccessibilityNodeInfosByText(digit.toString())
+            for (node in textNodes) {
+                if (node.isClickable && isPinKey(node)) {
+                    performClick(node)
+                    node.recycle()
+                    clicked = true
+                    break
+                }
                 node.recycle()
-                rootNode.recycle()
-                Log.d(logTag, "点击数字 $digit (文本查找)")
-                return
             }
-            node.recycle()
         }
         
         rootNode.recycle()
+        Log.d(logTag, if (clicked) "点击数字 $digit 成功" else "未找到数字 $digit 按钮")
     }
 
     private fun clickCharacter(char: Char) {
-        val rootNode = rootInActiveWindow ?: return
+        val rootNode = rootInActiveWindow ?: run {
+            gestureLock.withLock {
+                isGestureExecuting = false
+                gestureCondition.signalAll()
+            }
+            return
+        }
+        
+        var clicked = false
         val textNodes = rootNode.findAccessibilityNodeInfosByText(char.toString())
         for (node in textNodes) {
             if (node.isClickable) {
                 performClick(node)
                 node.recycle()
+                clicked = true
                 break
             }
             node.recycle()
         }
+        
         rootNode.recycle()
+        Log.d(logTag, if (clicked) "点击字符 $char 成功" else "未找到字符 $char 按钮")
     }
 
     private fun clickEnter() {
         val rootNode = rootInActiveWindow ?: run {
             Log.e(logTag, "根节点为空，无法点击确认")
+            gestureLock.withLock {
+                isGestureExecuting = false
+                gestureCondition.signalAll()
+            }
             return
         }
         
         val confirmTexts = arrayOf("确定", "确认", "OK", "完成", "解锁", "下一步", "Enter", "↵")
+        var clicked = false
+        
         for (text in confirmTexts) {
             val nodes = rootNode.findAccessibilityNodeInfosByText(text)
             for (node in nodes) {
                 if (node.isClickable) {
                     performClick(node)
                     node.recycle()
-                    rootNode.recycle()
-                    Log.d(logTag, "点击确认: $text")
-                    return
+                    clicked = true
+                    break
                 }
                 node.recycle()
             }
+            if (clicked) break
         }
         
-        // 备用方案：点击屏幕右下角
-        val displayMetrics = resources.displayMetrics
-        val x = (displayMetrics.widthPixels * 0.8).toInt()
-        val y = (displayMetrics.heightPixels * 0.9).toInt()
-        performClickRaw(x, y, 100)
+        if (!clicked) {
+            val displayMetrics = resources.displayMetrics
+            val x = (displayMetrics.widthPixels * 0.8).toInt()
+            val y = (displayMetrics.heightPixels * 0.9).toInt()
+            performClickRaw(x, y, 100)
+        }
+        
         rootNode.recycle()
+        Log.d(logTag, if (clicked) "点击确认成功" else "使用坐标点击确认")
     }
 
     private fun performClick(node: AccessibilityNodeInfo) {
@@ -920,7 +981,7 @@ class InputService : AccessibilityService() {
             if (isShowingHint) {
                 this.fakeEditTextForTextStateCalculation?.setText(null)
             } else {
-                this.fakeEditTextForTextStateCalculation?.setText(text)
+                this设备.fakeEditTextForTextStateCalculation?.setText(text)
             }
             if (textSelectionStart != -1 && textSelectionEnd != -1) {
                 this.fakeEditTextForTextStateCalculation?.setSelection(
@@ -1002,6 +1063,8 @@ class InputService : AccessibilityService() {
         } else {
             info.flags = 0
         }
+        info.eventTypes = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
+        info.feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC
         setServiceInfo(info)
         
         fakeEditTextForTextStateCalculation = EditText(this)
