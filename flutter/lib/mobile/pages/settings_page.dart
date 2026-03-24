@@ -156,11 +156,13 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
 
-    // 立即加载密码（不等待首帧）
-    _loadPassword();
-
-    // 原有初始化逻辑
+    // 修复：使用 addPostFrameCallback 确保在第一帧构建完成后再加载密码
+    // 避免在构建过程中调用 setState 导致的问题
     WidgetsBinding.instance.addPostFrameCallback((_) async {
+      // 首先加载密码，确保在其他初始化之前完成
+      await _loadPassword();
+      
+      // 原有初始化逻辑
       var update = false;
 
       if (_hasIgnoreBattery) {
@@ -235,18 +237,21 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
     });
   }
 
-  // 修复：立即加载密码，确保同步更新UI
+  // 修复：改进密码加载方法，确保正确更新 UI 状态
   Future<void> _loadPassword() async {
     try {
-      // 标记加载中
-      setState(() {
-        _isPasswordLoading = true;
-      });
+      // 只在 mounted 时更新加载状态
+      if (mounted) {
+        setState(() {
+          _isPasswordLoading = true;
+        });
+      }
       
-      // 同步调用原生方法（确保获取到密码）
+      // 调用原生方法获取密码
       final result = await gFFI.invokeMethod('get_unlock_password');
       final pwd = result as String? ?? '';
       
+      // 确保组件仍然挂载后再更新状态
       if (mounted) {
         setState(() {
           _currentPassword = pwd;
@@ -256,6 +261,7 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
       }
     } catch (e) {
       debugPrint("加载密码失败: $e");
+      // 确保组件仍然挂载后再更新状态
       if (mounted) {
         setState(() {
           _currentPassword = "";
@@ -265,13 +271,15 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
     }
   }
 
-  // 修复：直接保存指定密码（确保同步更新状态）
+  // 修复：改进密码保存方法，确保状态同步更新
   Future<void> _savePasswordDirect(String newPwd) async {
     try {
-      // 先更新UI状态（即时反馈）
-      setState(() {
-        _currentPassword = newPwd;
-      });
+      // 先更新 UI 状态（即时反馈）
+      if (mounted) {
+        setState(() {
+          _currentPassword = newPwd;
+        });
+      }
       
       // 调用原生保存
       final success = await gFFI.invokeMethod('save_unlock_password', {
@@ -282,20 +290,16 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
         showToast(newPwd.isNotEmpty ? "密码保存成功" : "密码已清空");
         debugPrint("密码保存成功，长度: ${newPwd.length}");
       } else {
-        // 保存失败回滚状态
-        setState(() {
-          _loadPassword(); // 重新加载原密码
-        });
-        showToast("密码保存失败");
+        // 保存失败，重新加载原密码以回滚状态
         debugPrint("密码保存失败: 返回false");
+        showToast("密码保存失败");
+        await _loadPassword(); // 重新加载原密码
       }
     } catch (e) {
-      // 异常回滚状态
-      setState(() {
-        _loadPassword(); // 重新加载原密码
-      });
-      showToast("保存出错: ${e.toString().substring(0, 50)}");
+      // 异常时重新加载原密码以回滚状态
       debugPrint("保存密码异常: $e");
+      showToast("保存出错: ${e.toString().substring(0, 50)}");
+      await _loadPassword(); // 重新加载原密码
     }
   }
 
@@ -603,7 +607,7 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
       )
     ];
 
-    // 修复：密码输入框设置项（确保明文显示且状态同步）
+    // 修复：密码输入框设置项（改进状态显示和对话框初始化）
     final List<AbstractSettingsTile> passwordTiles = [
       SettingsTile(
         title: Column(
@@ -630,7 +634,7 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
         leading: Icon(Icons.lock_outline, color: Colors.blueGrey),
         trailing: Icon(Icons.arrow_forward_ios, size: 16),
         onPressed: (context) {
-          // 每次创建新的控制器，使用当前密码初始化
+          // 修复：每次创建新的控制器，使用当前密码初始化
           final textController = TextEditingController(text: _currentPassword);
           // 用于控制密码可见性的状态
           final isPasswordVisible = false.obs;
