@@ -102,9 +102,9 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
   var _allowAskForNoteAtEndOfConnection = false;
   var _preventSleepWhileConnected = true;
 
-  // 密码输入框控制器
-  late TextEditingController _passwordController;
+  // 密码状态
   String _currentPassword = "";
+  // 移除类级别的密码控制器，改为每次对话框创建新的
 
   _SettingsState() {
     _enableAbr = option2bool(
@@ -156,13 +156,10 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
 
-    // 初始化密码输入框控制器
-    _passwordController = TextEditingController();
-    
-    // 从原生层读取已保存的密码
-    _loadPassword();
-
+    // 在首帧渲染后加载密码
     WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await _loadPassword();
+      
       var update = false;
 
       if (_hasIgnoreBattery) {
@@ -237,41 +234,39 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
     });
   }
 
-  // 从原生层加载密码（直接读取Android SharedPreferences）
+  // 从原生层加载密码
   Future<void> _loadPassword() async {
     try {
-      // 通过MethodChannel调用原生方法读取密码
-      // 原生端会直接从SharedPreferences读取，无需Flutter层传递
       final pwd = await gFFI.invokeMethod('get_unlock_password') as String? ?? '';
-      setState(() {
-        _currentPassword = pwd;
-        _passwordController.text = pwd;
-      });
-      debugPrint("密码加载成功: ${pwd.isNotEmpty ? "已设置" : "未设置"}");
+      if (mounted) {
+        setState(() {
+          _currentPassword = pwd;
+        });
+        debugPrint("密码加载成功: ${pwd.isNotEmpty ? "已设置(${pwd.length}位)" : "未设置"}");
+      }
     } catch (e) {
       debugPrint("加载密码失败: $e");
-      // 加载失败时清空密码状态
-      setState(() {
-        _currentPassword = "";
-        _passwordController.text = "";
-      });
+      if (mounted) {
+        setState(() {
+          _currentPassword = "";
+        });
+      }
     }
   }
 
-  // 保存密码到原生层（直接存储到Android SharedPreferences）
-  Future<void> _savePassword() async {
-    final newPwd = _passwordController.text.trim();
-    
+  // 直接保存指定密码
+  Future<void> _savePasswordDirect(String newPwd) async {
     try {
-      // 调用原生方法保存密码
       final success = await gFFI.invokeMethod('save_unlock_password', {
         'password': newPwd,
       });
       
       if (success == true) {
-        setState(() {
-          _currentPassword = newPwd;
-        });
+        if (mounted) {
+          setState(() {
+            _currentPassword = newPwd;
+          });
+        }
         showToast(newPwd.isNotEmpty ? "密码保存成功" : "密码已清空");
         debugPrint("密码保存成功，长度: ${newPwd.length}");
       } else {
@@ -287,7 +282,6 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _passwordController.dispose();
     super.dispose();
   }
 
@@ -298,9 +292,9 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
         final ibs = await checkAndUpdateIgnoreBatteryStatus();
         final sob = await checkAndUpdateStartOnBoot();
         if (ibs || sob) {
-          setState(() {});
+          if (mounted) setState(() {});
         }
-        // 恢复页面时重新加载密码，确保和原生层同步
+        // 恢复页面时重新加载密码
         await _loadPassword();
       }();
     }
@@ -581,7 +575,7 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
       )
     ];
 
-    // 密码输入框设置项 - 优化显示和交互
+    // 密码输入框设置项 - 每次点击创建新的对话框和控制器
     final List<AbstractSettingsTile> passwordTiles = [
       SettingsTile(
         title: Column(
@@ -590,7 +584,7 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
             Text('屏幕解锁密码'),
             Text(
               _currentPassword.isNotEmpty 
-                  ? '●●●●●●●● (已设置)' 
+                  ? '已设置: $_currentPassword'  // 显示明文密码方便核对
                   : '未设置密码',
               style: TextStyle(
                 fontSize: 12,
@@ -600,17 +594,22 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
           ],
         ),
         leading: Icon(Icons.lock_outline, color: Colors.blueGrey),
+        trailing: Icon(Icons.arrow_forward_ios, size: 16),
         onPressed: (context) {
-          // 弹出密码输入对话框
+          // 每次创建新的控制器，使用当前密码初始化
+          final textController = TextEditingController(text: _currentPassword);
+          // 用于控制密码可见性的状态
+          final isPasswordVisible = false.obs;
+          
           gFFI.dialogManager.show((setState, close, ctx) {
             return CustomAlertDialog(
               title: Text('设置屏幕解锁密码'),
-              content: Column(
+              content: Obx(() => Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   TextField(
-                    controller: _passwordController,
-                    obscureText: true,
+                    controller: textController,
+                    obscureText: !isPasswordVisible.value,  // 根据状态控制可见性
                     decoration: InputDecoration(
                       labelText: '请输入数字密码',
                       hintText: '建议使用4-6位数字',
@@ -618,9 +617,30 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
                         borderRadius: BorderRadius.circular(8),
                       ),
                       prefixIcon: Icon(Icons.lock),
+                      // 添加可见性切换按钮
+                      suffixIcon: IconButton(
+                        icon: Icon(
+                          isPasswordVisible.value 
+                              ? Icons.visibility_off 
+                              : Icons.visibility,
+                          color: Colors.grey,
+                        ),
+                        onPressed: () {
+                          isPasswordVisible.value = !isPasswordVisible.value;
+                        },
+                      ),
                     ),
                     keyboardType: TextInputType.number,
                     maxLength: 6,
+                  ),
+                  SizedBox(height: 8),
+                  // 显示当前输入的明文（方便核对）
+                  Text(
+                    '当前输入: ${textController.text}',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey[600],
+                    ),
                   ),
                   SizedBox(height: 16),
                   Row(
@@ -638,7 +658,8 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
                             backgroundColor: Colors.blue,
                           ),
                           onPressed: () async {
-                            await _savePassword();
+                            final newPwd = textController.text.trim();
+                            await _savePasswordDirect(newPwd);
                             close();
                           },
                           child: Text('保存'),
@@ -647,7 +668,7 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
                     ],
                   ),
                 ],
-              ),
+              )),
             );
           });
         },
@@ -774,8 +795,7 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
         initialValue: !_floatingWindowDisabled,
         title: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(translate('Floating window')),
-          Text('* ${translate('floating_window_tip')}',
-              style: Theme.of(context).textTheme.bodySmall),
+          Text('* ${translate('floating_window_tip')}'),
         ]),
         onToggle: bind.mainIsOptionFixed(key: kOptionDisableFloatingWindow)
             ? null
