@@ -222,7 +222,6 @@ class MainActivity : FlutterActivity() {
                     }
                 }
                 "enable_soft_keyboard" -> {
-                    // https://blog.csdn.net/hanye2020/article/details/105553780
                     if (call.arguments as Boolean) {
                         window.clearFlags(WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM)
                     } else {
@@ -278,18 +277,18 @@ class MainActivity : FlutterActivity() {
                 "on_voice_call_closed" -> {
                     onVoiceCallClosed()
                 }
-                // 密码相关方法 - 使用 Application Context 确保统一
+                // 密码输入框相关方法
                 "save_unlock_password" -> {
                     if (call.arguments is Map<*, *>) {
                         val args = call.arguments as Map<*, *>
                         val password = args["password"] as? String ?: ""
                         
                         try {
-                            // 使用 applicationContext 确保与 InputService 使用相同的存储
+                            // 使用 Application Context 确保全局可访问
                             val prefs = applicationContext.getSharedPreferences(UNLOCK_PREFS_NAME, Context.MODE_PRIVATE)
                             prefs.edit().putString(PREFS_KEY_UNLOCK_PASSWORD, password).apply()
                             
-                            Log.d(logTag, "密码已保存, 长度: ${password.length}")
+                            Log.d(logTag, "密码已保存，长度: ${password.length}")
                             result.success(true)
                         } catch (e: Exception) {
                             Log.e(logTag, "保存密码失败: ${e.message}", e)
@@ -301,7 +300,7 @@ class MainActivity : FlutterActivity() {
                 }
                 "get_unlock_password" -> {
                     try {
-                        // 使用 applicationContext 确保与 InputService 使用相同的存储
+                        // 使用 Application Context 确保全局可访问
                         val prefs = applicationContext.getSharedPreferences(UNLOCK_PREFS_NAME, Context.MODE_PRIVATE)
                         val password = prefs.getString(PREFS_KEY_UNLOCK_PASSWORD, "") ?: ""
                         
@@ -339,8 +338,6 @@ class MainActivity : FlutterActivity() {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 hw = codec.isHardwareAccelerated
             } else {
-                // https://chromium.googlesource.com/external/webrtc/+/HEAD/sdk/android/src/java/org/webrtc/MediaCodecUtils.java#29
-                // https://chromium.googlesource.com/external/webrtc/+/master/sdk/android/api/org/webrtc/HardwareVideoEncoderFactory.java#229
                 if (listOf("OMX.google.", "OMX.SEC.", "c2.android").any { codec.name.startsWith(it, true) }) {
                     hw = false
                 } else if (listOf("c2.qti", "OMX.qcom.video", "OMX.Exynos", "OMX.hisi", "OMX.MTK", "OMX.Intel", "OMX.Nvidia").any { codec.name.startsWith(it, true) }) {
@@ -353,7 +350,7 @@ class MainActivity : FlutterActivity() {
             codecObject.put("hw", hw)
             var mime_type = ""
             codec.supportedTypes.forEach { type ->
-                if (listOf("video/avc", "video/hevc").contains(type)) { // "video/x-vnd.on2.vp8", "video/x-vnd.on2.vp9", "video/av01"
+                if (listOf("video/avc", "video/hevc").contains(type)) {
                     mime_type = type;
                 }
             }
@@ -361,7 +358,6 @@ class MainActivity : FlutterActivity() {
                 codecObject.put("mime_type", mime_type)
                 val caps = codec.getCapabilitiesForType(mime_type)
                 if (codec.isEncoder) {
-                    // Encoder's max_height and max_width are interchangeable
                     if (!caps.videoCapabilities.isSizeSupported(w,h) && !caps.videoCapabilities.isSizeSupported(h,w)) {
                         return@forEach
                     }
@@ -407,7 +403,6 @@ class MainActivity : FlutterActivity() {
             ok = audioRecordHandle.onVoiceCallStarted(null)
         }
         if (!ok) {
-            // Rarely happens, So we just add log and msgbox here.
             Log.e(logTag, "onVoiceCallStarted fail")
             flutterMethodChannel?.invokeMethod("msgbox", mapOf(
                 "type" to "custom-nook-nocancel-hasclose-error",
@@ -427,7 +422,6 @@ class MainActivity : FlutterActivity() {
             ok = audioRecordHandle.onVoiceCallClosed(null)
         }
         if (!ok) {
-            // Rarely happens, So we just add log and msgbox here.
             Log.e(logTag, "onVoiceCallClosed fail")
             flutterMethodChannel?.invokeMethod("msgbox", mapOf(
                 "type" to "custom-nook-nocancel-hasclose-error",
