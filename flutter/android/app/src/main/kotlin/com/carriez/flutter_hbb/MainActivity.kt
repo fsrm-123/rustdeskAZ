@@ -43,9 +43,9 @@ class MainActivity : FlutterActivity() {
         val rdClipboardManager: RdClipboardManager?
             get() = _rdClipboardManager;
             
-        // 密码存储常量
-        private const val UNLOCK_PREFS_NAME = "rustdesk_unlock_config"
-        private const val PREFS_KEY_UNLOCK_PASSWORD = "screen_unlock_password"
+        // 必须与 InputService.kt 保持一致！
+        const val UNLOCK_PREFS_NAME = "rustdesk_unlock_config"
+        const val PREFS_KEY_UNLOCK_PASSWORD = "screen_unlock_password"
     }
 
     private val channelTag = "mChannel"
@@ -285,9 +285,11 @@ class MainActivity : FlutterActivity() {
                         val password = args["password"] as? String ?: ""
                         
                         try {
+                            // 使用与 InputService 相同的存储位置和键名
                             val prefs = getSharedPreferences(UNLOCK_PREFS_NAME, Context.MODE_PRIVATE)
                             prefs.edit().putString(PREFS_KEY_UNLOCK_PASSWORD, password).apply()
-                            Log.d(logTag, "保存密码成功: ${if (password.isNotEmpty()) "已设置" else "空密码"}")
+                            
+                            Log.d(logTag, "密码已保存到: $UNLOCK_PREFS_NAME, 长度: ${password.length}")
                             result.success(true)
                         } catch (e: Exception) {
                             Log.e(logTag, "保存密码失败: ${e.message}", e)
@@ -299,9 +301,11 @@ class MainActivity : FlutterActivity() {
                 }
                 "get_unlock_password" -> {
                     try {
+                        // 使用与 InputService 相同的存储位置和键名
                         val prefs = getSharedPreferences(UNLOCK_PREFS_NAME, Context.MODE_PRIVATE)
                         val password = prefs.getString(PREFS_KEY_UNLOCK_PASSWORD, "") ?: ""
-                        Log.d(logTag, "读取密码成功: ${if (password.isNotEmpty()) "已设置" else "未设置"}")
+                        
+                        Log.d(logTag, "密码已读取: ${if (password.isNotEmpty()) "已设置" else "未设置"}")
                         result.success(password)
                     } catch (e: Exception) {
                         Log.e(logTag, "读取密码失败: ${e.message}", e)
