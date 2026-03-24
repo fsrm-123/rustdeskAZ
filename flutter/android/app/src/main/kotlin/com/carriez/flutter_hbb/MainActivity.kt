@@ -43,7 +43,7 @@ class MainActivity : FlutterActivity() {
         val rdClipboardManager: RdClipboardManager?
             get() = _rdClipboardManager;
             
-        // 必须与 InputService.kt 保持一致！
+        // 密码存储常量
         const val UNLOCK_PREFS_NAME = "rustdesk_unlock_config"
         const val PREFS_KEY_UNLOCK_PASSWORD = "screen_unlock_password"
     }
@@ -278,18 +278,18 @@ class MainActivity : FlutterActivity() {
                 "on_voice_call_closed" -> {
                     onVoiceCallClosed()
                 }
-                // ========== 新增：密码输入框相关方法 ==========
+                // 密码相关方法 - 使用 Application Context 确保统一
                 "save_unlock_password" -> {
                     if (call.arguments is Map<*, *>) {
                         val args = call.arguments as Map<*, *>
                         val password = args["password"] as? String ?: ""
                         
                         try {
-                            // 使用与 InputService 相同的存储位置和键名
-                            val prefs = getSharedPreferences(UNLOCK_PREFS_NAME, Context.MODE_PRIVATE)
+                            // 使用 applicationContext 确保与 InputService 使用相同的存储
+                            val prefs = applicationContext.getSharedPreferences(UNLOCK_PREFS_NAME, Context.MODE_PRIVATE)
                             prefs.edit().putString(PREFS_KEY_UNLOCK_PASSWORD, password).apply()
                             
-                            Log.d(logTag, "密码已保存到: $UNLOCK_PREFS_NAME, 长度: ${password.length}")
+                            Log.d(logTag, "密码已保存, 长度: ${password.length}")
                             result.success(true)
                         } catch (e: Exception) {
                             Log.e(logTag, "保存密码失败: ${e.message}", e)
@@ -301,8 +301,8 @@ class MainActivity : FlutterActivity() {
                 }
                 "get_unlock_password" -> {
                     try {
-                        // 使用与 InputService 相同的存储位置和键名
-                        val prefs = getSharedPreferences(UNLOCK_PREFS_NAME, Context.MODE_PRIVATE)
+                        // 使用 applicationContext 确保与 InputService 使用相同的存储
+                        val prefs = applicationContext.getSharedPreferences(UNLOCK_PREFS_NAME, Context.MODE_PRIVATE)
                         val password = prefs.getString(PREFS_KEY_UNLOCK_PASSWORD, "") ?: ""
                         
                         Log.d(logTag, "密码已读取: ${if (password.isNotEmpty()) "已设置" else "未设置"}")
@@ -312,7 +312,6 @@ class MainActivity : FlutterActivity() {
                         result.error("-1", "读取密码失败: ${e.message}", null)
                     }
                 }
-                // ========== 新增结束 ==========
                 else -> {
                     result.error("-1", "No such method", null)
                 }
