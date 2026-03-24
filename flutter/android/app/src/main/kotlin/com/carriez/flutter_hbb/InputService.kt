@@ -85,16 +85,14 @@ class InputService : AccessibilityService() {
             get() = ctx != null
             
         @JvmStatic
-        fun performRemoteUnlock(password: String? = null) {
-            ctx?.let { service ->
-                val pwd = password ?: service.getUnlockPassword()
-                service.unlockScreen(pwd, null)
-            }
-        }
-        
-        @JvmStatic
         fun isScreenLocked(): Boolean {
             return ctx?.checkScreenLocked() ?: false
+        }
+        
+        // 供外部调用：确保屏幕已解锁
+        @JvmStatic
+        fun ensureScreenUnlocked(): Boolean {
+            return ctx?.ensureUnlocked() ?: false
         }
     }
 
@@ -122,12 +120,9 @@ class InputService : AccessibilityService() {
     }
 
     // ========== 解锁状态管理（线程安全） ==========
-    // 使用 AtomicBoolean 确保线程安全的状态检查
     private val isUnlocking = AtomicBoolean(false)
-    // 使用 Lock 确保解锁操作的互斥性
     private val unlockLock = ReentrantLock()
     private val unlockCondition = unlockLock.newCondition()
-    // 标记本次会话是否已经解锁过（防止重复解锁）
     private var hasUnlockedInThisSession = false
     
     private lateinit var backgroundHandler: Handler
@@ -139,7 +134,7 @@ class InputService : AccessibilityService() {
             .edit()
             .putString(PREFS_KEY_UNLOCK_PASSWORD, password)
             .apply()
-        Log.d(logTag, "保存解锁密码: ${if (password.isNotEmpty()) "●●●●●●" else "空密码"}")
+        Log.d(logTag, "保存解锁密码: ${if (password.isNotEmpty()) "已设置" else "空密码"}")
     }
 
     fun getUnlockPassword(): String {
@@ -171,7 +166,6 @@ class InputService : AccessibilityService() {
     }
 
     // ========== 会话管理 ==========
-    // 新会话开始时调用（控制端连接时）
     fun onSessionStarted() {
         unlockLock.withLock {
             hasUnlockedInThisSession = false
@@ -184,14 +178,11 @@ class InputService : AccessibilityService() {
     /**
      * 确保屏幕已解锁。如果正在解锁中，则等待解锁完成。
      * 如果屏幕已解锁或本次会话已解锁过，直接返回。
-     * 
-     * @return true 表示屏幕已解锁（或原本就未锁定），可以继续操作
-     *         false 表示解锁失败或无需解锁
      */
-    private fun ensureUnlocked(): Boolean {
+    fun ensureUnlocked(): Boolean {
         // 快速路径：检查是否需要解锁
         if (!checkScreenLocked()) {
-            return true // 屏幕未锁定，直接继续
+            return true
         }
         
         // 检查是否已在本会话解锁过
@@ -209,7 +200,7 @@ class InputService : AccessibilityService() {
             unlockLock.withLock {
                 while (isUnlocking.get()) {
                     try {
-                        unlockCondition.awaitNanos(100_000_000) // 等待100ms
+                        unlockCondition.awaitNanos(100_000_000L) // 等待100ms
                     } catch (e: InterruptedException) {
                         Thread.currentThread().interrupt()
                         return false
@@ -217,13 +208,13 @@ class InputService : AccessibilityService() {
                 }
             }
             Log.d(logTag, "等待解锁完成，继续操作")
-            return !checkScreenLocked() // 返回当前屏幕状态
+            return !checkScreenLocked()
         }
         
         // 获取到解锁权限，执行解锁
         try {
             val password = getUnlockPassword()
-            Log.d(logTag, "获取解锁权限，开始解锁，密码: ${if (password.isNotEmpty()) "已设置" else "未设置"}")
+            Log.d(logTag, "获取解锁权限，开始解锁")
             
             val unlockSuccess = performUnlockInternal(password)
             
@@ -237,7 +228,7 @@ class InputService : AccessibilityService() {
             // 释放解锁状态并通知等待的线程
             unlockLock.withLock {
                 isUnlocking.set(false)
-                unlockCondition.signalAll() // 唤醒所有等待的线程
+                unlockCondition.signalAll()
             }
         }
     }
@@ -258,13 +249,12 @@ class InputService : AccessibilityService() {
                 Thread.sleep(password.length * DIGIT_INPUT_INTERVAL + 300L)
             } else {
                 Log.d(logTag, "无密码，跳过密码输入")
-                // 等待系统响应
                 Thread.sleep(800L)
             }
             
             val stillLocked = checkScreenLocked()
             if (stillLocked) {
-                Log.w(logTag, "解锁后屏幕仍锁定，可能密码错误或解锁失败")
+                Log.w(logTag, "解锁后屏幕仍锁定")
             } else {
                 Log.d(logTag, "解锁成功")
             }
@@ -278,6 +268,7 @@ class InputService : AccessibilityService() {
 
     private fun wakeUpScreen() {
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        @SuppressLint("WakelockTimeout")
         val wakeLock = powerManager.newWakeLock(
             PowerManager.SCREEN_BRIGHT_WAKE_LOCK or
             PowerManager.ACQUIRE_CAUSES_WAKEUP or
@@ -304,23 +295,23 @@ class InputService : AccessibilityService() {
             .build()
         
         dispatchGesture(gesture, null, null)
-        Log.d(logTag, "执行上滑: ($x, $startY) -> ($x, $endY)")
+        Log.d(logTag, "执行上滑解锁")
     }
 
     private fun inputPassword(password: String) {
         Log.d(logTag, "输入密码，长度: ${password.length}")
         
         password.forEachIndexed { index, char ->
+            val delay = index * DIGIT_INPUT_INTERVAL
             backgroundHandler.postDelayed({
                 when {
                     char in '0'..'9' -> clickDigit(char - '0')
                     char == '\n' || char == '\r' -> clickEnter()
                     else -> clickCharacter(char)
                 }
-            }, index * DIGIT_INPUT_INTERVAL)
+            }, delay)
         }
         
-        // 最后点击确认
         backgroundHandler.postDelayed({
             clickEnter()
         }, password.length * DIGIT_INPUT_INTERVAL + 100L)
@@ -346,7 +337,7 @@ class InputService : AccessibilityService() {
                 performClick(nodes[0])
                 nodes[0].recycle()
                 rootNode.recycle()
-                Log.d(logTag, "点击数字 $digit (ID: $id)")
+                Log.d(logTag, "点击数字 $digit")
                 return
             }
             nodes.forEach { it.recycle() }
@@ -404,9 +395,9 @@ class InputService : AccessibilityService() {
         
         // 备用方案：点击屏幕右下角
         val displayMetrics = resources.displayMetrics
-        val x = displayMetrics.widthPixels * 0.8
-        val y = displayMetrics.heightPixels * 0.9
-        performClickRaw(x.toInt(), y.toInt(), 100)
+        val x = (displayMetrics.widthPixels * 0.8).toInt()
+        val y = (displayMetrics.heightPixels * 0.9).toInt()
+        performClickRaw(x, y, 100)
         rootNode.recycle()
     }
 
@@ -457,7 +448,6 @@ class InputService : AccessibilityService() {
             mouseY = (y * COMMON_SCREEN_INFO.scale).toInt()
             if (isWaitingLongPress) {
                 val delta = abs(oldX - mouseX) + abs(oldY - mouseY)
-                Log.d(logTag,"delta:$delta")
                 if (delta > 8) {
                     isWaitingLongPress = false
                 }
@@ -538,7 +528,6 @@ class InputService : AccessibilityService() {
             builder.addStroke(stroke)
             wheelActionsQueue.offer(builder.build())
             consumeWheelActions()
-
         }
 
         if (mask == WHEEL_UP) {
@@ -562,7 +551,6 @@ class InputService : AccessibilityService() {
 
     @RequiresApi(Build.VERSION_CODES.N)
     fun onTouchInput(mask: Int, _x: Int, _y: Int) {
-        // 确保屏幕已解锁（线程安全，不会重复触发）
         if (!ensureUnlocked()) {
             Log.w(logTag, "屏幕锁定且解锁失败，跳过触摸输入")
             return
@@ -572,8 +560,8 @@ class InputService : AccessibilityService() {
             TOUCH_PAN_UPDATE -> {
                 mouseX -= (_x * COMMON_SCREEN_INFO.scale).toInt()
                 mouseY -= (_y * COMMON_SCREEN_INFO.scale).toInt()
-                mouseX = max(0, mouseX);
-                mouseY = max(0, mouseY);
+                mouseX = max(0, mouseX)
+                mouseY = max(0, mouseY)
                 continueGesture(mouseX, mouseY)
             }
             TOUCH_PAN_START -> {
@@ -592,7 +580,6 @@ class InputService : AccessibilityService() {
 
     @RequiresApi(Build.VERSION_CODES.N)
     fun onKeyEvent(data: ByteArray) {
-        // 确保屏幕已解锁（线程安全，不会重复触发）
         if (!ensureUnlocked()) {
             Log.w(logTag, "屏幕锁定且解锁失败，跳过键盘输入")
             return
@@ -612,8 +599,6 @@ class InputService : AccessibilityService() {
                     textToCommit = String(Character.toChars(chr))
                 }
             }
-        } else if (keyboardMode == KeyboardMode.Translate) {
-        } else {
         }
 
         Log.d(logTag, "onKeyEvent $keyEvent textToCommit:$textToCommit")
@@ -634,9 +619,7 @@ class InputService : AccessibilityService() {
             getInputMethod()?.let { inputMethod ->
                 inputMethod.getCurrentInputConnection()?.let { inputConnection ->
                     if (textToCommit != null) {
-                        textToCommit?.let { text ->
-                            inputConnection.commitText(text, 1, null)
-                        }
+                        inputConnection.commitText(textToCommit, 1, null)
                     } else {
                         ke?.let { event ->
                             inputConnection.sendKeyEvent(event)
@@ -653,7 +636,6 @@ class InputService : AccessibilityService() {
             handler.post {
                 ke?.let { event ->
                     val possibleNodes = possibleAccessibiltyNodes()
-                    Log.d(logTag, "possibleNodes:$possibleNodes")
                     for (item in possibleNodes) {
                         val success = trySendKeyEvent(event, item, textToCommit)
                         if (success) {
@@ -749,7 +731,7 @@ class InputService : AccessibilityService() {
                 dispatchGesture(builder.build(), null, null)
             }
         } catch (e: Exception) {
-            Log.e(logTag, "doDispatchGesture, willContinue:$willContinue, error:$e")
+            Log.e(logTag, "doDispatchGesture error: $e")
         }
     }
 
@@ -785,7 +767,7 @@ class InputService : AccessibilityService() {
             Log.d(logTag, "end gesture x:$x y:$y time:$duration")
             dispatchGesture(builder.build(), null, null)
         } catch (e: Exception) {
-            Log.e(logTag, "endGesture error:$e")
+            Log.e(logTag, "endGesture error: $e")
         }
     }
 
@@ -829,7 +811,7 @@ class InputService : AccessibilityService() {
     private fun tryHandlePowerKeyEvent(event: KeyEventAndroid): Boolean {
         if (event.keyCode == KeyEventAndroid.KEYCODE_POWER) {
             if (event.action == KeyEventAndroid.ACTION_UP) {
-                performGlobalAction(GLOBAL_ACTION_POWER_DIALOG);
+                performGlobalAction(GLOBAL_ACTION_POWER_DIALOG)
             }
             return true
         }
@@ -837,9 +819,6 @@ class InputService : AccessibilityService() {
     }
 
     private fun insertAccessibilityNode(list: LinkedList<AccessibilityNodeInfo>, node: AccessibilityNodeInfo) {
-        if (node == null) {
-            return
-        }
         if (list.contains(node)) {
             return
         }
@@ -850,14 +829,14 @@ class InputService : AccessibilityService() {
         if (node == null) {
             return null
         }
-        if (node.isEditable() && node.isFocusable()) {
+        if (node.isEditable && node.isFocusable) {
             return node
         }
-        val childCount = node.getChildCount()
+        val childCount = node.childCount
         for (i in 0 until childCount) {
             val child = node.getChild(i)
             if (child != null) {
-                if (child.isEditable() && child.isFocusable()) {
+                if (child.isEditable && child.isFocusable) {
                     return child
                 }
                 if (Build.VERSION.SDK_INT < 33) {
@@ -887,14 +866,12 @@ class InputService : AccessibilityService() {
         val latestList = LinkedList<AccessibilityNodeInfo>()
 
         val focusInput = findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
-        var focusAccessibilityInput = findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+        val focusAccessibilityInput = findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
 
-        val rootInActiveWindow = getRootInActiveWindow()
-
-        Log.d(logTag, "focusInput:$focusInput focusAccessibilityInput:$focusAccessibilityInput rootInActiveWindow:$rootInActiveWindow")
+        val rootInActiveWindow = rootInActiveWindow
 
         if (focusInput != null) {
-            if (focusInput.isFocusable() && focusInput.isEditable()) {
+            if (focusInput.isFocusable && focusInput.isEditable) {
                 insertAccessibilityNode(linkedList, focusInput)
             } else {
                 insertAccessibilityNode(latestList, focusInput)
@@ -902,7 +879,7 @@ class InputService : AccessibilityService() {
         }
 
         if (focusAccessibilityInput != null) {
-            if (focusAccessibilityInput.isFocusable() && focusAccessibilityInput.isEditable()) {
+            if (focusAccessibilityInput.isFocusable && focusAccessibilityInput.isEditable) {
                 insertAccessibilityNode(linkedList, focusAccessibilityInput)
             } else {
                 insertAccessibilityNode(latestList, focusAccessibilityInput)
@@ -910,8 +887,6 @@ class InputService : AccessibilityService() {
         }
 
         val childFromFocusInput = findChildNode(focusInput)
-        Log.d(logTag, "childFromFocusInput:$childFromFocusInput")
-
         if (childFromFocusInput != null) {
             insertAccessibilityNode(linkedList, childFromFocusInput)
         }
@@ -920,7 +895,6 @@ class InputService : AccessibilityService() {
         if (childFromFocusAccessibilityInput != null) {
             insertAccessibilityNode(linkedList, childFromFocusAccessibilityInput)
         }
-        Log.d(logTag, "childFromFocusAccessibilityInput:$childFromFocusAccessibilityInput")
 
         if (rootInActiveWindow != null) {
             insertAccessibilityNode(linkedList, rootInActiveWindow)
@@ -938,10 +912,10 @@ class InputService : AccessibilityService() {
         this.fakeEditTextForTextStateCalculation?.setSelection(0,0)
         this.fakeEditTextForTextStateCalculation?.setText(null)
 
-        val text = node.getText()
+        val text = node.text
         var isShowingHint = false
         if (Build.VERSION.SDK_INT >= 26) {
-            isShowingHint = node.isShowingHintText()
+            isShowingHint = node.isShowingHintText
         }
 
         var textSelectionStart = node.textSelectionStart
@@ -960,8 +934,6 @@ class InputService : AccessibilityService() {
         }
 
         var success = false
-
-        Log.d(logTag, "existing text:$text textToCommit:$textToCommit textSelectionStart:$textSelectionStart textSelectionEnd:$textSelectionEnd")
 
         if (textToCommit != null) {
             if ((textSelectionStart == -1) || (textSelectionEnd == -1)) {
@@ -984,7 +956,6 @@ class InputService : AccessibilityService() {
                 this.fakeEditTextForTextStateCalculation?.setText(text)
             }
             if (textSelectionStart != -1 && textSelectionEnd != -1) {
-                Log.d(logTag, "setting selection $textSelectionStart $textSelectionEnd")
                 this.fakeEditTextForTextStateCalculation?.setSelection(
                     textSelectionStart,
                     textSelectionEnd
@@ -998,12 +969,10 @@ class InputService : AccessibilityService() {
                 it.layout(rect.left, rect.top, rect.right, rect.bottom)
                 it.onPreDraw()
                 if (event.action == KeyEventAndroid.ACTION_DOWN) {
-                    val succ = it.onKeyDown(event.getKeyCode(), event)
-                    Log.d(logTag, "onKeyDown $succ")
+                    it.onKeyDown(event.keyCode, event)
                 } else if (event.action == KeyEventAndroid.ACTION_UP) {
-                    val success = it.onKeyUp(event.getKeyCode(), event)
-                    Log.d(logTag, "keyup $success")
-                } else {}
+                    it.onKeyUp(event.keyCode, event)
+                }
             }
 
             success = updateTextAndSelectionForAccessibiltyNode(node)
@@ -1077,8 +1046,6 @@ class InputService : AccessibilityService() {
         fakeEditTextForTextStateCalculation = EditText(this)
         fakeEditTextForTextStateCalculation?.layoutParams = LayoutParams(100, 100)
         fakeEditTextForTextStateCalculation?.onPreDraw()
-        val layout = fakeEditTextForTextStateCalculation?.getLayout()
-        Log.d(logTag, "fakeEditTextForTextStateCalculation layout:$layout")
         Log.d(logTag, "onServiceConnected!")
     }
 
