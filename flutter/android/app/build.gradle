@@ -6,6 +6,7 @@ plugins {
     id "com.android.application"
     id "kotlin-android"
     id "dev.flutter.flutter-gradle-plugin"
+    id "com.huawei.agconnect" // 🔥 华为推送插件（必须加）
 }
 
 def keystoreProperties = new Properties()
@@ -57,12 +58,12 @@ String findRustlsPlatformVerifierMavenDir() {
     return mavenDir.path
 }
 
-
 repositories {
     maven {
         url = findRustlsPlatformVerifierMavenDir()
         metadataSources.artifact()
     }
+    maven { url 'https://developer.huawei.com/repo/' } // 🔥 华为 Maven 仓库
 }
 
 protobuf {
@@ -96,8 +97,6 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-       // applicationId "com.carriez.flutter_hbb"
         applicationId "com.kyyk.rust"
         minSdkVersion 22
         targetSdkVersion 33
@@ -116,8 +115,6 @@ android {
 
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig signingConfigs.release
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules'
         }
@@ -135,4 +132,8 @@ dependencies {
     implementation("org.jetbrains.kotlin:kotlin-stdlib") { version { strictly("1.9.10") } }
     implementation 'com.caverock:androidsvg-aar:1.4'
     implementation "rustls:rustls-platform-verifier:0.1.1"
+
+    // 🔥 华为推送核心依赖
+    implementation 'com.huawei.agconnect:agconnect-core:1.9.1.300'
+    implementation 'com.huawei.hms:push:6.12.0.300'
 }
