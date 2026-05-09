@@ -1,8 +1,21 @@
+// 🔥 华为推送必须添加的 buildscript
+buildscript {
+    repositories {
+        google()
+        jcenter()
+        maven { url 'https://developer.huawei.com/repo/' } // 华为仓库
+    }
+    dependencies {
+        classpath "com.huawei.agconnect:agcp:1.9.1.300" // 华为推送插件
+    }
+}
+
 allprojects {
     repositories {
         google()
         jcenter()
         maven { url 'https://jitpack.io' }
+        maven { url 'https://developer.huawei.com/repo/' } // 华为仓库
     }
 }
 
@@ -11,7 +24,7 @@ subprojects {
     project.buildDir = "${rootProject.buildDir}/${project.name}"
 }
 subprojects {
-    project.evaluationDependsOn(':app')
+    project.evaluationDepends(':app')
 }
 
 tasks.register("clean", Delete) {
