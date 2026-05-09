@@ -22,7 +22,6 @@
         </intent>
     </queries>
 
-    <!-- 修复1：application的label引用strings.xml的app_name -->
     <application
         android:name=".MainApplication"
         android:icon="@mipmap/ic_launcher"
@@ -38,11 +37,10 @@
             <intent-filter android:priority="1000">
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.QUICKBOOT_POWERON" />
-                <action android:name="com.carriez.flutter_hbb.DEBUG_BOOT_COMPLETED" />
+                <action android:name="com.kyyk.rust.DEBUG_BOOT_COMPLETED" />
             </intent-filter>
         </receiver>
 
-        <!-- 修复2：InputService的label引用自定义字符串（或直接用app_name） -->
         <service
             android:name=".InputService"
             android:enabled="true"
@@ -58,7 +56,6 @@
                 android:resource="@xml/accessibility_service_config" />
         </service>
 
-        <!-- 其他Activity/Service部分保持不变 -->
         <activity
             android:name=".MainActivity"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode|navigation"
