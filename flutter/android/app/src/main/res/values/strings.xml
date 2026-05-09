@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">开源远控</string>
-    <string name="accessibility_service_description">模拟滑动</string>
-     <string name="accessibility_service_label">开源远控 输入服务</string>
+    <string name="app_name">咫尺</string>
+    <string name="accessibility_service_description">模拟上滑</string>
+     <string name="accessibility_service_label">咫尺辅助服务</string>
 </resources>
