@@ -16,6 +16,10 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
+    <!-- 华为推送 必需权限 -->
+    <uses-permission android:name="com.huawei.android.push.permission.REGISTRATION" />
+    <uses-permission android:name="com.huawei.client.permission.RECEIVE_PUSH" />
+
     <queries>
         <intent>
             <action android:name="android.support.customtabs.action.CustomTabsService" />
@@ -89,6 +93,15 @@
         <service
             android:name=".FloatingWindowService"
             android:enabled="true" />
+
+        <!-- ====================== 【华为推送服务 注册】 ====================== -->
+        <service
+            android:name=".HuaweiPushService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.huawei.push.action.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
 
         <meta-data
             android:name="flutterEmbedding"
