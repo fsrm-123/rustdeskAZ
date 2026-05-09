@@ -70,15 +70,12 @@ jobs:
       fail-fast: false
       matrix:
         job:
-          # - { target: i686-pc-windows-msvc        , os: windows-2022                  }
-          # - { target: x86_64-pc-windows-gnu       , os: windows-2022                  }
           - {
               target: x86_64-pc-windows-msvc,
               os: windows-2022,
               arch: x86_64,
               vcpkg-triplet: x64-windows-static,
             }
-          # - { target: aarch64-pc-windows-msvc, os: windows-2022, arch: aarch64 }
     steps:
       - name: Export GitHub Actions cache environment variables
         uses: actions/github-script@v6
@@ -104,7 +101,7 @@ jobs:
           version: ${{ env.LLVM_VERSION }}
 
       - name: Install flutter
-        uses: subosito/flutter-action@v2.12.0 #https://github.com/subosito/flutter-action/issues/277
+        uses: subosito/flutter-action@v2.12.0
         with:
           channel: "stable"
           flutter-version: ${{ env.FLUTTER_VERSION }}
@@ -124,6 +121,18 @@ jobs:
           cp .github/patches/flutter_3.24.4_dropdown_menu_enableFilter.diff $(dirname $(dirname $(which flutter)))
           cd $(dirname $(dirname $(which flutter)))
           [[ "3.24.5" == ${{env.FLUTTER_VERSION}} ]] && git apply flutter_3.24.4_dropdown_menu_enableFilter.diff
+
+      # ================= 新增：清理 Flutter 缓存（Windows） =================
+      - name: Clean Flutter caches and force re-fetch dependencies
+        shell: bash
+        run: |
+          rm -rf ~/.pub-cache
+          cd flutter
+          flutter clean
+          rm -f pubspec.lock
+          flutter pub get
+          cd ..
+      # ====================================================================
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@v1
@@ -162,6 +171,7 @@ jobs:
           fi
           head -n 100 "${VCPKG_ROOT}/buildtrees/ffmpeg/build-${{ matrix.job.vcpkg-triplet }}-rel-out.log" || true
         shell: bash
+
       - name: Build rustdesk
         run: |
           # Windows: build RustDesk
@@ -203,8 +213,6 @@ jobs:
           }
 
       - name: find Runner.res
-        # Windows: find Runner.res (compiled from ./flutter/windows/runner/Runner.rc), copy to ./Runner.res
-        # Runner.rc does not contain actual version, but Runner.res does
         continue-on-error: true
         shell: bash
         run: |
@@ -290,15 +298,12 @@ jobs:
       fail-fast: false
       matrix:
         job:
-          # - { target: i686-pc-windows-msvc        , os: windows-2022                  }
-          # - { target: x86_64-pc-windows-gnu       , os: windows-2022                  }
           - {
               target: i686-pc-windows-msvc,
               os: windows-2022,
               arch: x86,
               vcpkg-triplet: x86-windows-static,
             }
-          # - { target: aarch64-pc-windows-msvc, os: windows-2022 }
     steps:
       - name: Export GitHub Actions cache environment variables
         uses: actions/github-script@v6
@@ -320,7 +325,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@v1
         with:
-          toolchain: nightly-2023-10-13-${{ matrix.job.target }} # must use nightly here, because of abi_thiscall feature required
+          toolchain: nightly-2023-10-13-${{ matrix.job.target }}
           targets: ${{ matrix.job.target }}
           components: "rustfmt"
 
@@ -369,15 +374,10 @@ jobs:
           echo "output_folder=./Release" >> $GITHUB_OUTPUT
           curl -LJ -o ./usbmmidd_v2.zip https://github.com/rustdesk-org/rdev/releases/download/usbmmidd_v2/usbmmidd_v2.zip
           unzip usbmmidd_v2.zip
-          # Do not remove x64 files, because the user may run the 32bit version on a 64bit system.
-          # Do not remove ./usbmmidd_v2/deviceinstaller64.exe, as x86 exe cannot install and uninstall drivers when running on x64,
-          # we need the x64 exe to install and uninstall the driver.
           rm -rf ./usbmmidd_v2/deviceinstaller.exe ./usbmmidd_v2/usbmmidd.bat
           mv ./usbmmidd_v2 ./Release || true
 
       - name: find Runner.res
-        # Windows: find Runner.res (compiled from ./flutter/windows/runner/Runner.rc), copy to ./Runner.res
-        # Runner.rc does not contain actual version, but Runner.res does
         continue-on-error: true
         shell: bash
         run: |
@@ -420,7 +420,7 @@ jobs:
         if: env.UPLOAD_ARTIFACT == 'true' && env.SIGN_BASE_URL != '-2'
         shell: bash
         run: |
-          BASE_URL=${{ env.SIGN_BASE_URL }} SECRET_KEY=${{ secrets.SIGN_SECRET_KEY }} python3 res/job.py sign_files ./SignOutput/
+          BASE_URL=${{ env.SIGN_BASE_URL }} SECRET_KEY=${{ secrets.SIGN_SECRET_KEY }} python3 res/job.py sign_files ./SignOutput
 
       - name: Publish Release
         uses: softprops/action-gh-release@v1
@@ -531,25 +531,7 @@ jobs:
         run: |
           pushd flutter
           # flutter build ipa --release --obfuscate --split-debug-info=./split-debug-info --no-codesign
-          # for easy debugging
           flutter build ipa --release --no-codesign
-
-      # - name: Upload Artifacts
-      #   # if: env.ANDROID_SIGNING_KEY != null && env.UPLOAD_ARTIFACT == 'true'
-      #   uses: actions/upload-artifact@master
-      #   with:
-      #     name: rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}.apk
-      #     path: flutter/build/ios/ipa/*.ipa
-
-      # - name: Publish ipa package
-      #   # if: env.ANDROID_SIGNING_KEY != null && env.UPLOAD_ARTIFACT == 'true'
-      #   uses: softprops/action-gh-release@v1
-      #   with:
-      #     prerelease: true
-      #     tag_name: ${{ env.TAG_NAME }}
-      #     files: |
-      #       flutter/build/ios/ipa/*.ipa
-
 
   build-for-macOS:
     name: ${{ matrix.job.target }}
@@ -561,7 +543,7 @@ jobs:
         job:
           - {
               target: x86_64-apple-darwin,
-              os: macos-15-intel, #macos-latest or macos-14 use M1 now, https://docs.github.com/en/actions/using-github-hosted-runners/about-github-hosted-runners/about-github-hosted-runners#:~:text=14%20GB-,macos%2Dlatest%20or%20macos%2D14,-The%20macos%2Dlatestlabel
+              os: macos-15-intel,
               extra-build-args: "",
               arch: x86_64,
               vcpkg-triplet: x64-osx,
@@ -569,7 +551,6 @@ jobs:
           - {
               target: aarch64-apple-darwin,
               os: macos-14,
-              # extra-build-args: "--disable-flutter-texture-render", # disable this for mac, because we see a lot of users reporting flickering both on arm and x64, and we can not confirm if texture rendering has better performance if htere is no vram, https://github.com/rustdesk/rustdesk/issues/6296
               extra-build-args: "--screencapturekit",
               arch: aarch64,
               vcpkg-triplet: arm64-osx,
@@ -605,7 +586,6 @@ jobs:
         if: env.MACOS_P12_BASE64 != null
         uses: timheuer/base64-to-file@v1.2
         with:
-          # https://gregoryszorc.com/docs/apple-codesign/stable/apple_codesign_rcodesign.html#notarizing-and-stapling
           fileName: rustdesk.json
           fileDir: ${{ github.workspace }}
           encodedString: ${{ secrets.MACOS_NOTARIZE_JSON }}
@@ -623,7 +603,6 @@ jobs:
       - name: Install build runtime
         run: |
           brew install llvm create-dmg
-          # pkg-config is handled in a separate step, because it may be already installed by `macos-latest`(14.7.1) runner
           if command -v pkg-config &>/dev/null; then
               echo "pkg-config is already installed"
           else
@@ -632,10 +611,6 @@ jobs:
 
       - name: Install NASM
         run: |
-          # Install NASM 2.16.x from official release.
-          # Do NOT use `brew install nasm` which installs NASM 3.x.
-          # NASM 3.x is a complete rewrite with incompatible CLI options and removed features.
-          # aom and other multimedia libraries require NASM 2.x for x86/x86_64 assembly.
           wget https://www.nasm.us/pub/nasm/releasebuilds/2.16.03/macosx/nasm-2.16.03-macosx.zip
           unzip nasm-2.16.03-macosx.zip
           sudo cp nasm-2.16.03/nasm /usr/local/bin/nasm
@@ -656,9 +631,20 @@ jobs:
         shell: bash
         run: |
           cd "$(dirname "$(which flutter)")"
-          # https://github.com/flutter/flutter/issues/133533
           sed -i -e 's/_setFramesEnabledState(false);/\/\/_setFramesEnabledState(false);/g' ../packages/flutter/lib/src/scheduler/binding.dart
           grep -n '_setFramesEnabledState(false);' ../packages/flutter/lib/src/scheduler/binding.dart
+
+      # ================= 新增：清理 Flutter 缓存（macOS） =================
+      - name: Clean Flutter caches and force re-fetch dependencies
+        shell: bash
+        run: |
+          rm -rf ~/.pub-cache
+          cd flutter
+          flutter clean
+          rm -f pubspec.lock
+          flutter pub get
+          cd ..
+      # ====================================================================
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@v1
@@ -733,24 +719,20 @@ jobs:
         uses: actions/upload-artifact@master
         with:
           name: rustdesk-unsigned-macos-${{ matrix.job.arch }}
-          path: rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}.dmg # can not upload the directory directly or tar.gz, which destroy the link structure, causing the codesign failed
+          path: rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}.dmg
 
       - name: Codesign app and create signed dmg
         if: env.MACOS_P12_BASE64 != null && env.UPLOAD_ARTIFACT == 'true'
         run: |
-          # Patch create-dmg to give more attempts to unmount image
           CREATE_DMG="$(command -v create-dmg)"
           CREATE_DMG="$(readlink -f "$CREATE_DMG")"
           sed -i -e 's/MAXIMUM_UNMOUNTING_ATTEMPTS=3/MAXIMUM_UNMOUNTING_ATTEMPTS=7/' "$CREATE_DMG"
-          # Unlock keychain
           security default-keychain -s rustdesk.keychain
           security unlock-keychain -p ${{ secrets.MACOS_P12_PASSWORD }} rustdesk.keychain
-          # start sign the rustdesk.app and dmg
           rm -rf *.dmg || true
           codesign --force --options runtime -s ${{ secrets.MACOS_CODESIGN_IDENTITY }} --deep --strict ./flutter/build/macos/Build/Products/Release/RustDesk.app -vvv
           create-dmg --icon "RustDesk.app" 200 190 --hide-extension "RustDesk.app" --window-size 800 400 --app-drop-link 600 185 rustdesk-${{ env.VERSION }}.dmg ./flutter/build/macos/Build/Products/Release/RustDesk.app
           codesign --force --options runtime -s ${{ secrets.MACOS_CODESIGN_IDENTITY }} --deep --strict rustdesk-${{ env.VERSION }}.dmg -vvv
-          # notarize the rustdesk-${{ env.VERSION }}.dmg
           rcodesign notary-submit --api-key-path ${{ github.workspace }}/rustdesk.json  --staple rustdesk-${{ env.VERSION }}.dmg
 
       - name: Rename rustdesk
@@ -966,7 +948,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          prefix-key: rustdesk-lib-cache-android # TODO: drop '-android' part after caches are invalidated
+          prefix-key: rustdesk-lib-cache-android
           key: ${{ matrix.job.target }}
 
       - name: Build rustdesk lib
@@ -1010,17 +992,23 @@ jobs:
         env:
           JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
         run: |
+          # ================= 新增：清理 Flutter 缓存（Android） =================
+          rm -rf ~/.pub-cache
+          cd flutter
+          flutter clean
+          rm -f pubspec.lock
+          flutter pub get
+          cd ..
+          # ====================================================================
+
           export PATH=/usr/lib/jvm/java-17-openjdk-amd64/bin:$PATH
-          # Increase Gradle JVM memory for CI builds
           sed -i "s/org.gradle.jvmargs=-Xmx1024M/org.gradle.jvmargs=-Xmx2g/g" ./flutter/android/gradle.properties
-          # temporary use debug sign config
           sed -i "s/signingConfigs.release/signingConfigs.debug/g" ./flutter/android/app/build.gradle
           case ${{ matrix.job.target }} in
             aarch64-linux-android)
               mkdir -p ./flutter/android/app/src/main/jniLibs/arm64-v8a
               cp ${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so ./flutter/android/app/src/main/jniLibs/arm64-v8a/
               cp ./target/${{ matrix.job.target }}/release/liblibrustdesk.so ./flutter/android/app/src/main/jniLibs/arm64-v8a/librustdesk.so
-              # build flutter
               pushd flutter
               flutter build apk "--${{ matrix.job.reltype }}" --target-platform android-arm64 --split-per-abi
               mv build/app/outputs/flutter-apk/app-arm64-v8a-${{ matrix.job.reltype }}.apk ../rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}${{ matrix.job.suffix }}.apk
@@ -1029,7 +1017,6 @@ jobs:
               mkdir -p ./flutter/android/app/src/main/jniLibs/armeabi-v7a
               cp ${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/arm-linux-androideabi/libc++_shared.so ./flutter/android/app/src/main/jniLibs/armeabi-v7a/
               cp ./target/${{ matrix.job.target }}/release/liblibrustdesk.so ./flutter/android/app/src/main/jniLibs/armeabi-v7a/librustdesk.so
-              # build flutter
               pushd flutter
               flutter build apk "--${{ matrix.job.reltype }}" --target-platform android-arm --split-per-abi
               mv build/app/outputs/flutter-apk/app-armeabi-v7a-${{ matrix.job.reltype }}.apk ../rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}${{ matrix.job.suffix }}.apk
@@ -1038,7 +1025,6 @@ jobs:
               mkdir -p ./flutter/android/app/src/main/jniLibs/x86_64
               cp ${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/x86_64-linux-android/libc++_shared.so ./flutter/android/app/src/main/jniLibs/x86_64/
               cp ./target/${{ matrix.job.target }}/release/liblibrustdesk.so ./flutter/android/app/src/main/jniLibs/x86_64/librustdesk.so
-              # build flutter
               pushd flutter
               flutter build apk "--${{ matrix.job.reltype }}" --target-platform android-x64 --split-per-abi
               mv build/app/outputs/flutter-apk/app-x86_64-${{ matrix.job.reltype }}.apk ../rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}${{ matrix.job.suffix }}.apk
@@ -1047,7 +1033,6 @@ jobs:
               mkdir -p ./flutter/android/app/src/main/jniLibs/x86
               cp ${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/i686-linux-android/libc++_shared.so ./flutter/android/app/src/main/jniLibs/x86/
               cp ./target/${{ matrix.job.target }}/release/liblibrustdesk.so ./flutter/android/app/src/main/jniLibs/x86/librustdesk.so
-              # build flutter
               pushd flutter
               flutter build apk "--${{ matrix.job.reltype }}" --target-platform android-x86 --split-per-abi
               mv build/app/outputs/flutter-apk/app-x86-${{ matrix.job.reltype }}.apk ../rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}${{ matrix.job.suffix }}.apk
@@ -1057,7 +1042,6 @@ jobs:
           mkdir -p signed-apk; pushd signed-apk
           mv ../rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}${{ matrix.job.suffix }}.apk .
 
-      # https://github.com/r0adkll/sign-android-release/issues/84#issuecomment-1889636075
       - name: Setup sign tool version variable
         shell: bash
         run: |
@@ -1076,7 +1060,6 @@ jobs:
           keyStorePassword: ${{ secrets.ANDROID_KEY_STORE_PASSWORD }}
           keyPassword: ${{ secrets.ANDROID_KEY_PASSWORD }}
         env:
-          # env.ANDROID_SIGN_TOOL_VERSION is set by Step "Setup sign tool version variable"
           BUILD_TOOLS_VERSION: ${{ env.ANDROID_SIGN_TOOL_VERSION }}
 
       - name: Upload Artifacts
@@ -1111,7 +1094,7 @@ jobs:
     runs-on: ubuntu-24.04
     env:
       reltype: release
-      x86_target: "" # can be ",android-x86"
+      x86_target: ""
       suffix: ""
     steps:
       - name: Free Disk Space (Ubuntu)
@@ -1220,9 +1203,7 @@ jobs:
           JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
         run: |
           export PATH=/usr/lib/jvm/java-17-openjdk-amd64/bin:$PATH
-          # Increase Gradle JVM memory for CI builds
           sed -i "s/org.gradle.jvmargs=-Xmx1024M/org.gradle.jvmargs=-Xmx2g/g" ./flutter/android/gradle.properties
-          # temporary use debug sign config
           sed -i "s/signingConfigs.release/signingConfigs.debug/g" ./flutter/android/app/build.gradle
           mv ./flutter/android/app/src/main/jniLibs/arm64-v8a/liblibrustdesk.so ./flutter/android/app/src/main/jniLibs/arm64-v8a/librustdesk.so
           cp ${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so ./flutter/android/app/src/main/jniLibs/arm64-v8a/
@@ -1234,14 +1215,12 @@ jobs:
             mv ./flutter/android/app/src/main/jniLibs/x86/liblibrustdesk.so ./flutter/android/app/src/main/jniLibs/x86/librustdesk.so
             cp ${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/i686-linux-android/libc++_shared.so ./flutter/android/app/src/main/jniLibs/x86/
           fi
-          # build flutter
           pushd flutter
           flutter build apk "--${{ env.reltype }}" --target-platform android-arm64,android-arm,android-x64${{ env.x86_target }}
           popd
           mkdir -p signed-apk
           mv ./flutter/build/app/outputs/flutter-apk/app-${{ env.reltype }}.apk signed-apk/rustdesk-${{ env.VERSION }}-universal${{ env.suffix }}.apk
 
-      # https://github.com/r0adkll/sign-android-release/issues/84#issuecomment-1889636075
       - name: Setup sign tool version variable
         shell: bash
         run: |
@@ -1260,7 +1239,6 @@ jobs:
           keyStorePassword: ${{ secrets.ANDROID_KEY_STORE_PASSWORD }}
           keyPassword: ${{ secrets.ANDROID_KEY_PASSWORD }}
         env:
-          # env.ANDROID_SIGN_TOOL_VERSION is set by Step "Setup sign tool version variable"
           BUILD_TOOLS_VERSION: ${{ env.ANDROID_SIGN_TOOL_VERSION }}
 
       - name: Upload Artifacts
@@ -1295,7 +1273,6 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # use a high level qemu-user-static
         job:
           - {
               arch: x86_64,
@@ -1363,7 +1340,6 @@ jobs:
 
       - name: Disable rust bridge build
         run: |
-          # only build cdylib
           sed -i  "s/\[\"cdylib\", \"staticlib\", \"rlib\"\]/\[\"cdylib\"\]/g" Cargo.toml
 
       - name: Restore bridge files
@@ -1425,7 +1401,6 @@ jobs:
           shell: /bin/bash
           install: |
             apt-get update -y
-            echo -e "installing deps"
             apt-get install -y \
                build-essential \
                clang \
@@ -1459,29 +1434,28 @@ jobs:
                wget \
                xz-utils \
                libssl-dev
-            # we have libopus compiled by us.
             apt-get remove -y libopus-dev || true
-            # output devs
             ls -l ./
             tree -L 3 /opt/artifacts/vcpkg/installed
           run: |
-            # disable git safe.directory
             git config --global --add safe.directory "*"
-            # rust
+
+            # ================= 新增：清理 Flutter 缓存（Linux） =================
+            rm -rf ~/.pub-cache
+            cd /workspace/flutter 2>/dev/null && flutter clean && rm -f pubspec.lock && flutter pub get && cd .. || true
+            # ====================================================================
+
             pushd /opt
-            # do not use rustup, because memory overflow in qemu
             wget -O rust.tar.gz https://static.rust-lang.org/dist/rust-${{env.RUST_TOOLCHAIN_VERSION}}-${{ matrix.job.target }}.tar.gz
             tar -zxvf rust.tar.gz > /dev/null && rm rust.tar.gz
             cd rust-${{env.RUST_TOOLCHAIN_VERSION}}-${{ matrix.job.target }} && ./install.sh
             rm -rf rust-${{env.RUST_TOOLCHAIN_VERSION}}-${{ matrix.job.target }}
-            # edit config
             mkdir -p ~/.cargo/
             echo """
               [source.crates-io]
               registry = 'https://github.com/rust-lang/crates.io-index'
             """ > ~/.cargo/config
             cat ~/.cargo/config
-            # start build
             pushd /workspace
             export VCPKG_ROOT=/opt/artifacts/vcpkg
             if [[ "${{ matrix.job.arch }}" == "aarch64" ]]; then
@@ -1494,8 +1468,6 @@ jobs:
             rm -rf target/release/deps target/release/build
             rm -rf ~/.cargo
 
-            # Setup Flutter
-            # disable git safe.directory
             git config --global --add safe.directory "*"
             pushd /workspace
             case ${{ matrix.job.arch }} in
@@ -1514,7 +1486,6 @@ jobs:
             tar xf flutter_linux_${{ env.FLUTTER_VERSION }}-stable.tar.xz
             case ${{ matrix.job.arch }} in
               aarch64)
-                # clone repo and reset to flutter ${{ env.FLUTTER_VERSION }}
                 git clone https://github.com/sony/flutter-elinux.git || true
                 pushd flutter-elinux
                   git fetch
@@ -1543,7 +1514,6 @@ jobs:
               popd
             fi
 
-            # build flutter
             pushd /workspace
             export CARGO_INCREMENTAL=0
             export DEB_ARCH=${{ matrix.job.deb_arch }}
@@ -1552,7 +1522,6 @@ jobs:
               mv "$name" "${name%%.deb}-${{ matrix.job.arch }}.deb"
             done
 
-            # rpm package
             echo -e "start packaging fedora package"
             pushd /workspace
             case ${{ matrix.job.arch }} in
@@ -1566,7 +1535,6 @@ jobs:
                 mv "$name" /workspace/"${name%%.rpm}.rpm"
             done
 
-            # rpm suse package
             echo -e "start packaging suse package"
             pushd /workspace
             case ${{ matrix.job.arch }} in
@@ -1597,9 +1565,6 @@ jobs:
           name: rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}.deb
           path: rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}.deb
 
-      # only x86_64 for arch since we can not find newest arm64 docker image to build
-      # old arch image does not make sense for arch since it is "arch" which always update to date
-      # and failed to makepkg arm64 on x86_64
       - name: Patch archlinux PKGBUILD
         if: matrix.job.arch == 'x86_64' && env.UPLOAD_ARTIFACT == 'true'
         run: |
@@ -1632,7 +1597,6 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # use a high level qemu-user-static
         job:
           - {
               arch: x86_64,
@@ -1670,7 +1634,6 @@ jobs:
       - name: Modify vcpkg.json for armv7
         if: matrix.job.vcpkg-triplet == 'arm-linux'
         run: |
-          # Replace the baseline in vcpkg.json with ARMV7_VCPKG_COMMIT_ID for armv7 builds
           sed -i 's/"baseline": ".*"/"baseline": "${{ env.ARMV7_VCPKG_COMMIT_ID }}"/' vcpkg.json
           echo "Modified vcpkg.json for armv7 build:"
           grep -A 2 -B 2 '"baseline"' vcpkg.json
@@ -1740,12 +1703,8 @@ jobs:
                xz-utils \
                zip \
                libssl-dev
-            # arm-linux needs CMake and vcokg built from source as there
-            # are no prebuilts available from Kitware and Microsoft
             if [ "${{ matrix.job.vcpkg-triplet }}" = "arm-linux" ]; then
-              # install gcc/g++ 8 for vcpkg and OpenSSL headers for CMake
               apt-get install -y gcc-8 g++-8
-              # bootstrap CMake amd add it to PATH
               git clone --depth 1 https://github.com/kitware/cmake -b "v${{ env.SCITER_ARMV7_CMAKE_VERSION }}" /tmp/cmake
               pushd /tmp/cmake
               ./bootstrap --generator='Unix Makefiles' "--prefix=/opt/cmake-${{ env.SCITER_ARMV7_CMAKE_VERSION }}-linux-armhf"
@@ -1754,14 +1713,12 @@ jobs:
               rm -rf /tmp/cmake
               export PATH="/opt/cmake-${{ env.SCITER_ARMV7_CMAKE_VERSION }}-linux-armhf/bin:$PATH"
             fi
-            # bootstrap vcpkg and set VCPKG_ROOT
             export VCPKG_ROOT=/opt/artifacts/vcpkg
             mkdir -p /opt/artifacts
             pushd /opt/artifacts
             rm -rf vcpkg
             git clone https://github.com/microsoft/vcpkg
             pushd vcpkg
-            # build vcpkg helper executable with gcc-8 for arm-linux but use prebuilt one on x64-linux
             if [ "${{ matrix.job.vcpkg-triplet }}" = "arm-linux" ]; then
               git reset --hard ${{ env.ARMV7_VCPKG_COMMIT_ID }}
               CC=/usr/bin/gcc-8 CXX=/usr/bin/g++-8 sh bootstrap-vcpkg.sh -disableMetrics
@@ -1771,9 +1728,7 @@ jobs:
             fi
             popd
             popd
-            # rust
             pushd /opt
-            # do not use rustup, because memory overflow in qemu
             wget --output-document rust.tar.gz https://static.rust-lang.org/dist/rust-${{env.RUST_TOOLCHAIN_VERSION}}-${{ matrix.job.target }}.tar.gz
             tar -zxvf rust.tar.gz > /dev/null && rm rust.tar.gz
             pushd rust-${{env.RUST_TOOLCHAIN_VERSION}}-${{ matrix.job.target }}
@@ -1781,30 +1736,23 @@ jobs:
             popd
             rm -rf rust-${{env.RUST_TOOLCHAIN_VERSION}}-${{ matrix.job.target }}
             popd
-            # install newer nasm for aom
             wget --output-document nasm.deb "http://ftp.us.debian.org/debian/pool/main/n/nasm/nasm_${{ env.SCITER_NASM_DEBVERSION }}_${{ matrix.job.deb_arch }}.deb"
             dpkg -i nasm.deb
             rm -f nasm.deb
           run: |
-            # disable git safe.directory
             git config --global --add safe.directory "*"
-            # set python3.7 as default python3
             update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.7 1
-            # add built CMake to PATH and set VCPKG_FORCE_SYSTEM_BINARIES Afor arm-linux
             if [ "${{ matrix.job.vcpkg-triplet }}" = "arm-linux" ]; then
               export PATH="/opt/cmake-${{ env.SCITER_ARMV7_CMAKE_VERSION }}-linux-armhf/bin:$PATH"
               export VCPKG_FORCE_SYSTEM_BINARIES=1
             fi
-            # edit cargo config
             mkdir -p ~/.cargo/
             echo """
               [source.crates-io]
               registry = 'https://github.com/rust-lang/crates.io-index'
             """ > ~/.cargo/config
             cat ~/.cargo/config
-            # install dependencies from vcpkg
             export VCPKG_ROOT=/opt/artifacts/vcpkg
-            # remove this when support higher version
             export USE_AOM_391=1
             if ! $VCPKG_ROOT/vcpkg install --triplet ${{ matrix.job.vcpkg-triplet }} --x-install-root="$VCPKG_ROOT/installed"; then
               find "${VCPKG_ROOT}/" -name "*.log" | while read -r _1; do
@@ -1817,11 +1765,9 @@ jobs:
               exit 1
             fi
             head -n 100 "${VCPKG_ROOT}/buildtrees/ffmpeg/build-${{ matrix.job.vcpkg-triplet }}-rel-out.log" || true
-            # build rustdesk
             python3 ./res/inline-sciter.py
             export CARGO_INCREMENTAL=0
             cargo build --features inline${{ matrix.job.extra_features }} --release --bins --jobs 1
-            # make debian package
             mkdir -p ./Release
             mv ./target/release/rustdesk ./Release/rustdesk
             wget -O ./Release/libsciter-gtk.so https://github.com/c-smile/sciter-sdk/raw/master/bin.lnx/${{ matrix.job.sciter_arch }}/libsciter-gtk.so
@@ -1832,7 +1778,6 @@ jobs:
         shell: bash
         run: |
           for name in rustdesk*??.deb; do
-              # use cp to duplicate deb files to fit other packages.
               cp "$name" "${name%%.deb}-${{ matrix.job.arch }}-sciter.deb"
           done
 
@@ -1882,14 +1827,9 @@ jobs:
       - name: Build appimage package
         shell: bash
         run: |
-          # install libarchive-tools for bsdtar command used in AppImageBuilder.yml
           sudo apt-get update -y
-          # https://github.com/AppImage/AppImageKit/wiki/FUSE
           sudo apt-get install -y libarchive-tools libfuse2
-          # set-up appimage-builder
-          # https://github.com/AppImage/AppImageKit/issues/1395
           sudo pip3 install git+https://github.com/rustdesk-org/appimage-builder.git
-          # run appimage-builder
           pushd appimage
           sudo appimage-builder --skip-tests --recipe ./AppImageBuilder-${{ matrix.job.arch }}.yml
 
@@ -1915,7 +1855,6 @@ jobs:
         job:
           - {
               target: x86_64-unknown-linux-gnu,
-              # https://github.com/ostreedev/ostree/commit/4bac96a8c817beda37448f9b8c662162bb619981
               distro: ubuntu22.04,
               on: ubuntu-22.04,
               arch: x86_64,
@@ -1930,7 +1869,6 @@ jobs:
             }
           - {
               target: aarch64-unknown-linux-gnu,
-              # try out newer flatpak since error of "error: Nothing matches org.freedesktop.Platform in remote flathub"
               distro: ubuntu22.04,
               on: ubuntu-22.04-arm,
               arch: aarch64,
@@ -1968,12 +1906,9 @@ jobs:
             apt-get update -y
             apt-get install -y git flatpak flatpak-builder
           run: |
-            # disable git safe.directory
             git config --global --add safe.directory "*"
             pushd /workspace
-            # flatpak deps
             flatpak --user remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-            # package
             pushd flatpak
             git clone https://github.com/flathub/shared-modules.git --depth=1
             flatpak-builder --user --install-deps-from=flathub -y --force-clean --repo=repo ./build ./rustdesk.json
@@ -2009,7 +1944,7 @@ jobs:
           sudo apt-get install -y wget npm
 
       - name: Install flutter
-        uses: subosito/flutter-action@v2.12.0 #https://github.com/subosito/flutter-action/issues/277
+        uses: subosito/flutter-action@v2.12.0
         with:
           channel: "stable"
           flutter-version: ${{ env.FLUTTER_VERSION }}
@@ -2020,7 +1955,6 @@ jobs:
           cd $(dirname $(dirname $(which flutter)))
           [[ "3.24.5" == ${{env.FLUTTER_VERSION}} ]] && git apply ${{ github.workspace }}/.github/patches/flutter_3.24.4_dropdown_menu_enableFilter.diff
 
-      # https://rustdesk.com/docs/en/dev/build/web/
       - name: Build web
         shell: bash
         run: |
@@ -2028,9 +1962,7 @@ jobs:
           npm install yarn -g
           npm install typescript -g
           npm install protoc -g
-          # Install protoc first, see: https://google.github.io/proto-lens/installing-protoc.html
           npm install ts-proto
-          # Only works with vite <= 2.8, see: https://github.com/vitejs/vite/blob/main/docs/guide/build.md#chunking-strategy
           npm install vite@2.8
           yarn install && yarn build
           popd
@@ -2044,7 +1976,6 @@ jobs:
           flutter build web --release
           cd build
           cp ../web/README.md web
-          # TODO: Remove the following line when the web is almost complete.
           echo -e "\n\nThis build is for preview and not full functionality." >> web/README.md
           dir_name="rustdesk-${{ env.VERSION }}-${{ env.RELEASE_NAME }}"
           mv web "${dir_name}" && tar czf "${dir_name}".tar.gz "${dir_name}"
