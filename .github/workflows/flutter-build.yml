@@ -124,15 +124,6 @@ jobs:
           cp .github/patches/flutter_3.24.4_dropdown_menu_enableFilter.diff $(dirname $(dirname $(which flutter)))
           cd $(dirname $(dirname $(which flutter)))
           [[ "3.24.5" == ${{env.FLUTTER_VERSION}} ]] && git apply flutter_3.24.4_dropdown_menu_enableFilter.diff
-          # ========== 新增清理步骤 ==========
-      - name: Clean Flutter caches and force re-fetch dependencies
-        shell: bash
-        run: |
-          flutter clean
-          rm -rf ~/.pub-cache
-          rm -f pubspec.lock
-          flutter pub get
-      # =================================
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@v1
@@ -171,16 +162,6 @@ jobs:
           fi
           head -n 100 "${VCPKG_ROOT}/buildtrees/ffmpeg/build-${{ matrix.job.vcpkg-triplet }}-rel-out.log" || true
         shell: bash
-        # ========== 新增清理步骤 ==========
-      - name: Clean Flutter caches and force re-fetch dependencies
-        shell: bash
-        run: |
-          flutter clean
-          rm -rf ~/.pub-cache
-          rm -f pubspec.lock
-          flutter pub get
-      # =================================
-
       - name: Build rustdesk
         run: |
           # Windows: build RustDesk
