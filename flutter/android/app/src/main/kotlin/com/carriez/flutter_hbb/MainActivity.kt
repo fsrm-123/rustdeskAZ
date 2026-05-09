@@ -1,4 +1,4 @@
-package com.carriez.flutter_hbb
+package com.kyyk.rust
 
 /**
  * Handle events from flutter
