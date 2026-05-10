@@ -988,6 +988,7 @@ jobs:
           path: ./target/${{ matrix.job.target }}/release/liblibrustdesk.so
           
       # 👇 在这里粘贴那 3 行 👇
+            # 还原自定义签名密钥库
       - name: 还原签名文件
         run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > flutter/android/app/release.keystore
         shell: bash
@@ -996,7 +997,7 @@ jobs:
         shell: bash
         env:
           JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
-
+        run: |
           # ================= 新增：清理 Flutter 缓存（Android） =================
           rm -rf ~/.pub-cache
           cd flutter
@@ -1009,6 +1010,7 @@ jobs:
           export PATH=/usr/lib/jvm/java-17-openjdk-amd64/bin:$PATH
           sed -i "s/org.gradle.jvmargs=-Xmx1024M/org.gradle.jvmargs=-Xmx2g/g" ./flutter/android/gradle.properties
           sed -i "s/signingConfigs.release/signingConfigs.debug/g" ./flutter/android/app/build.gradle
+          
           case ${{ matrix.job.target }} in
             aarch64-linux-android)
               mkdir -p ./flutter/android/app/src/main/jniLibs/arm64-v8a
@@ -1047,6 +1049,8 @@ jobs:
           mkdir -p signed-apk; pushd signed-apk
           mv ../rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}${{ matrix.job.suffix }}.apk .
 
+        
+#结束
       - name: Setup sign tool version variable
         shell: bash
         run: |
