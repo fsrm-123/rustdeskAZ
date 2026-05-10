@@ -988,16 +988,15 @@ jobs:
           path: ./target/${{ matrix.job.target }}/release/liblibrustdesk.so
           
       # 👇 在这里粘贴那 3 行 👇
-      -- name: 还原签名文件
-         run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > flutter/android/app/release.keystore
-         shell: bash
+      - name: 还原签名文件
+        run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > flutter/android/app/release.keystore
+        shell: bash
 
-        
       - name: Build rustdesk
         shell: bash
         env:
           JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
-        run: |
+
           # ================= 新增：清理 Flutter 缓存（Android） =================
           rm -rf ~/.pub-cache
           cd flutter
