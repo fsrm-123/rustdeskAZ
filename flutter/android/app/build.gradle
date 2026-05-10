@@ -6,13 +6,7 @@ plugins {
     id "com.android.application"
     id "kotlin-android"
     id "dev.flutter.flutter-gradle-plugin"
-    id "com.huawei.agconnect" // 🔥 华为推送插件（必须加）
-}
-
-def keystoreProperties = new Properties()
-def keystorePropertiesFile = rootProject.file('key.properties')
-if (keystorePropertiesFile.exists()) {
-    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+    id "com.huawei.agconnect"
 }
 
 def localProperties = new Properties()
@@ -63,7 +57,7 @@ repositories {
         url = findRustlsPlatformVerifierMavenDir()
         metadataSources.artifact()
     }
-    maven { url 'https://developer.huawei.com/repo/' } // 🔥 华为 Maven 仓库
+    maven { url 'https://developer.huawei.com/repo/' }
 }
 
 protobuf {
@@ -104,13 +98,14 @@ android {
         versionName flutterVersionName
     }
 
+    // ====================== 【你的固定签名配置】 ======================
     signingConfigs {
-      release {
-        keyAlias keystoreProperties['keyAlias']
-        keyPassword keystoreProperties['keyPassword']
-        storeFile keystoreProperties['storeFile'] ? file(keystoreProperties['storeFile']) : null
-        storePassword keystoreProperties['storePassword']
-      }
+        release {
+            storeFile file("release.keystore")
+            storePassword System.getenv("KEYSTORE_PASSWORD")
+            keyAlias System.getenv("KEY_ALIAS")
+            keyPassword System.getenv("KEY_PASSWORD")
+        }
     }
 
     buildTypes {
@@ -129,11 +124,10 @@ dependencies {
     implementation 'com.google.protobuf:protobuf-javalite:3.20.1'
     implementation "androidx.media:media:1.6.0"
     implementation 'com.github.getActivity:XXPermissions:18.5'
-    implementation("org.jetbrains.kotlin:kotlin-stdlib") { version { strictly("1.9.10") } }
+    implementation "org.jetbrains.kotlin:kotlin-stdlib" { version { strictly("1.9.10") } }
     implementation 'com.caverock:androidsvg-aar:1.4'
     implementation "rustls:rustls-platform-verifier:0.1.1"
 
-    // 🔥 华为推送核心依赖
     implementation 'com.huawei.agconnect:agconnect-core:1.9.1.300'
     implementation 'com.huawei.hms:push:6.12.0.300'
 }
