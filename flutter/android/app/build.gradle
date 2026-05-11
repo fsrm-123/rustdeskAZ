@@ -1,6 +1,8 @@
 import com.google.protobuf.gradle.*
 import groovy.json.JsonSlurper
 
+apply plugin: 'com.huawei.agconnect'
+
 plugins {
     id "com.google.protobuf" version "0.9.4"
     id "com.android.application"
