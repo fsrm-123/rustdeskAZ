@@ -6,9 +6,9 @@ buildscript {
         maven { url 'https://developer.huawei.com/repo/' }
     }
     dependencies {
-        // 必须要有这行！华为报错根源
         classpath "com.android.tools.build:gradle:8.1.0"
-        classpath "org.jetbrains.kotlin:gradle-plugin:$kotlin_version"
+        // 已修复：gradle-plugin → kotlin-gradle-plugin
+        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
         classpath 'com.huawei.agconnect:agcp:1.9.1.300'
     }
 }
@@ -27,7 +27,6 @@ subprojects {
     project.buildDir = "${rootProject.buildDir}/${project.name}"
 }
 subprojects {
-    // 新版Gradle必须加 On
     project.evaluationDependsOn(':app')
 }
 
