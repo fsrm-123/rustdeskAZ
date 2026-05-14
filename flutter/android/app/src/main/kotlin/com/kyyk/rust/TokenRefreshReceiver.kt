@@ -8,24 +8,18 @@ import io.flutter.plugin.common.MethodChannel
 
 class TokenRefreshReceiver : BroadcastReceiver() {
     companion object {
-        // 必须和 MainActivity 里的通道一致
         private const val CHANNEL = "com.kyyk.rust/huawei_token"
+        var activity: FlutterActivity? = null
     }
 
     override fun onReceive(context: Context?, intent: Intent?) {
-        if (intent?.action == "com.kyyk.rust.UPDATE_TOKEN") {
-            val token = intent.getStringExtra("token") ?: ""
+        if (intent?.action == "com.huawei.push.token.REFRESH") {
+            // 这里必须改名，不能用 activity = activity
+            val currentActivity = activity ?: return
+            val engine = currentActivity.flutterEngine ?: return
+            val binaryMessenger = engine.dartExecutor.binaryMessenger
 
-            // 刷新 Flutter 界面（真正生效的代码）
-            try {
-                val activity = context as? FlutterActivity
-                activity?.let {
-                    MethodChannel(it.flutterEngine?.dartExecutor?.binaryMessenger, CHANNEL)
-                        .invokeMethod("onTokenRefreshed", token)
-                }
-            } catch (e: Exception) {
-                // 页面未打开时不崩溃
-            }
+            MethodChannel(binaryMessenger, CHANNEL).invokeMethod("onTokenRefresh", null)
         }
     }
 }
