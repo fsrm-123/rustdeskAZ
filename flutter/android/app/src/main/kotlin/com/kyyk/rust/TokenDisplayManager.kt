@@ -43,7 +43,7 @@ class TokenDisplayManager {
                 }
             }
 
-            val filter = IntentFilter("com.kyyk.rust.UPDATE_TOKEN")
+           val filter = IntentFilter("com.kyyk.rust.HMS_TOKEN")
             activity.registerReceiver(receiver, filter)
         }
     }
