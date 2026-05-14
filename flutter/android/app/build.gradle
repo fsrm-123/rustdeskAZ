@@ -102,7 +102,7 @@ android {
     }
 
     // ====================== 签名配置 对齐GitHub Secrets ======================
-    signingConfigs {
+   signingConfigs {
     release {
         // 适配你现有的 GitHub Secrets 变量名
         storeFile file(System.getenv("RELEASE_STORE_FILE"))
