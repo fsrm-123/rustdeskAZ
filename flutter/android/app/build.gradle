@@ -103,13 +103,14 @@ android {
 
     // ====================== 签名配置 对齐GitHub Secrets ======================
     signingConfigs {
-        release {
-            storeFile file(System.getenv("RELEASE_STORE_FILE"))
-            storePassword System.getenv("RELEASE_STORE_PASSWORD")
-            keyAlias System.getenv("RELEASE_KEY_ALIAS")
-            keyPassword System.getenv("RELEASE_KEY_PASSWORD")
-        }
+    release {
+        // 适配你现有的 GitHub Secrets 变量名
+        storeFile file(System.getenv("RELEASE_STORE_FILE"))
+        storePassword System.getenv("KEYSTORE_PASSWORD")
+        keyAlias System.getenv("KEY_ALIAS")
+        keyPassword System.getenv("KEY_PASSWORD")
     }
+}
 
     buildTypes {
         release {
