@@ -34,6 +34,8 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import kotlin.concurrent.thread
 
+// ============== 修复：正确导入华为 HMS ==============
+import com.huawei.hms.aaid.HmsInstanceId;
 
 class MainActivity : FlutterActivity() {
     companion object {
@@ -61,9 +63,9 @@ class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         TokenRefreshReceiver.flutterEngine = flutterEngine // 加这一行
-        // ====================== 修复：主动获取华为 Token ======================
+        // ====================== 修复：正确获取华为 Token ======================
         try {
-            com.huawei.hms.instance.id.HmsInstanceId.getInstance(this).getToken()
+            HmsInstanceId.getInstance(this).getToken()
             android.util.Log.i("HuaweiPush", "已触发获取华为Token")
         } catch (e: Exception) {
             android.util.Log.e("HuaweiPush", "获取Token失败", e)
@@ -89,7 +91,7 @@ class MainActivity : FlutterActivity() {
                 // ====================== 刷新按钮：重新获取华为 Token ======================
                 "refreshHuaweiToken" -> {
                     try {
-                        com.huawei.hms.instance.id.HmsInstanceId.getInstance(this).getToken()
+                        HmsInstanceId.getInstance(this).getToken()
                         Log.i("HuaweiPush", "刷新按钮：已触发重新获取Token")
                         result.success(true)
                     } catch (e: Exception) {
