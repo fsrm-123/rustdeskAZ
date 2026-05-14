@@ -48,6 +48,9 @@ class MainActivity : FlutterActivity() {
         const val PREFS_KEY_UNLOCK_PASSWORD = "screen_unlock_password"
     }
 
+    // ====================== 新增：华为 Token 通道 ======================
+    private val HUAWEI_TOKEN_CHANNEL = "com.kyyk.rust/huawei_token"
+
     private val channelTag = "mChannel"
     private val logTag = "mMainActivity"
     private var mainService: MainService? = null
@@ -67,6 +70,16 @@ class MainActivity : FlutterActivity() {
             channelTag
         )
         initFlutterChannel(flutterMethodChannel!!)
+
+        // ====================== 新增：提供华为 Token 给 Flutter ======================
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, HUAWEI_TOKEN_CHANNEL).setMethodCallHandler { call, result ->
+            if (call.method == "getHuaweiToken") {
+                result.success(HuaweiPushService.currentToken)
+            } else {
+                result.notImplemented()
+            }
+        }
+
         thread {
             try {
                 setCodecInfo()
@@ -103,9 +116,9 @@ class MainActivity : FlutterActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        
-        // ====================== 【只加这一行】 ======================
-        TokenDisplayManager.init(this)
+
+        // ====================== 已删除：悬浮窗代码 ======================
+        // TokenDisplayManager.init(this)
 
         if (_rdClipboardManager == null) {
             _rdClipboardManager = RdClipboardManager(getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
