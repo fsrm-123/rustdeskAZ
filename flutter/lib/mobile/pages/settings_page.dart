@@ -102,9 +102,13 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
   var _allowAskForNoteAtEndOfConnection = false;
   var _preventSleepWhileConnected = true;
 
-  // 密码状态（确保初始化后立即加载）
+  // 密码状态
   String _currentPassword = "";
-  bool _isPasswordLoading = true; // 增加加载状态
+  bool _isPasswordLoading = true;
+
+  // ====================== 华为 Token 新增 ======================
+  static const MethodChannel _tokenChannel = MethodChannel("com.kyyk.rust/huawei_token");
+  String _huaweiToken = "获取中...";
 
   _SettingsState() {
     _enableAbr = option2bool(
@@ -156,13 +160,10 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
 
-    // 修复：使用 addPostFrameCallback 确保在第一帧构建完成后再加载密码
-    // 避免在构建过程中调用 setState 导致的问题
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      // 首先加载密码，确保在其他初始化之前完成
       await _loadPassword();
-      
-      // 原有初始化逻辑
+      await _loadHuaweiToken(); // 加载华为Token
+
       var update = false;
 
       if (_hasIgnoreBattery) {
@@ -237,21 +238,31 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
     });
   }
 
-  // 修复：改进密码加载方法，确保正确更新 UI 状态
+  // ====================== 加载华为 Token ======================
+  Future<void> _loadHuaweiToken() async {
+    try {
+      final token = await _tokenChannel.invokeMethod("getHuaweiToken");
+      setState(() {
+        _huaweiToken = token.isEmpty ? "未获取到Token" : token;
+      });
+    } catch (e) {
+      setState(() {
+        _huaweiToken = "获取失败: ${e.toString()}";
+      });
+    }
+  }
+
   Future<void> _loadPassword() async {
     try {
-      // 只在 mounted 时更新加载状态
       if (mounted) {
         setState(() {
           _isPasswordLoading = true;
         });
       }
       
-      // 调用原生方法获取密码
       final result = await gFFI.invokeMethod('get_unlock_password');
       final pwd = result as String? ?? '';
       
-      // 确保组件仍然挂载后再更新状态
       if (mounted) {
         setState(() {
           _currentPassword = pwd;
@@ -261,7 +272,6 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
       }
     } catch (e) {
       debugPrint("加载密码失败: $e");
-      // 确保组件仍然挂载后再更新状态
       if (mounted) {
         setState(() {
           _currentPassword = "";
@@ -271,17 +281,14 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
     }
   }
 
-  // 修复：改进密码保存方法，确保状态同步更新
   Future<void> _savePasswordDirect(String newPwd) async {
     try {
-      // 先更新 UI 状态（即时反馈）
       if (mounted) {
         setState(() {
           _currentPassword = newPwd;
         });
       }
       
-      // 调用原生保存
       final success = await gFFI.invokeMethod('save_unlock_password', {
         'password': newPwd,
       });
@@ -290,16 +297,14 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
         showToast(newPwd.isNotEmpty ? "密码保存成功" : "密码已清空");
         debugPrint("密码保存成功，长度: ${newPwd.length}");
       } else {
-        // 保存失败，重新加载原密码以回滚状态
         debugPrint("密码保存失败: 返回false");
         showToast("密码保存失败");
-        await _loadPassword(); // 重新加载原密码
+        await _loadPassword();
       }
     } catch (e) {
-      // 异常时重新加载原密码以回滚状态
       debugPrint("保存密码异常: $e");
       showToast("保存出错: ${e.toString().substring(0, 50)}");
-      await _loadPassword(); // 重新加载原密码
+      await _loadPassword();
     }
   }
 
@@ -318,8 +323,8 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
         if (ibs || sob) {
           setState(() {});
         }
-        // 恢复页面时强制重新加载密码
         await _loadPassword();
+        await _loadHuaweiToken(); // 返回前台刷新Token
       }();
     }
   }
@@ -607,7 +612,7 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
       )
     ];
 
-    // 修复：密码输入框设置项（改进状态显示和对话框初始化）
+    // 密码设置项
     final List<AbstractSettingsTile> passwordTiles = [
       SettingsTile(
         title: Column(
@@ -622,7 +627,7 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
             else
               Text(
                 _currentPassword.isNotEmpty 
-                    ? '已设置: $_currentPassword'  // 显示明文（按要求）
+                    ? '已设置: $_currentPassword'
                     : '未设置密码',
                 style: TextStyle(
                   fontSize: 12,
@@ -634,9 +639,7 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
         leading: Icon(Icons.lock_outline, color: Colors.blueGrey),
         trailing: Icon(Icons.arrow_forward_ios, size: 16),
         onPressed: (context) {
-          // 修复：每次创建新的控制器，使用当前密码初始化
           final textController = TextEditingController(text: _currentPassword);
-          // 用于控制密码可见性的状态
           final isPasswordVisible = false.obs;
           
           gFFI.dialogManager.show((setState, close, ctx) {
@@ -647,7 +650,7 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
                 children: [
                   TextField(
                     controller: textController,
-                    obscureText: !isPasswordVisible.value,  // 根据状态控制可见性
+                    obscureText: !isPasswordVisible.value,
                     decoration: InputDecoration(
                       labelText: '请输入数字密码',
                       hintText: '建议使用4-6位数字',
@@ -655,7 +658,6 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
                         borderRadius: BorderRadius.circular(8),
                       ),
                       prefixIcon: Icon(Icons.lock),
-                      // 添加可见性切换按钮
                       suffixIcon: IconButton(
                         icon: Icon(
                           isPasswordVisible.value 
@@ -672,7 +674,6 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
                     maxLength: 6,
                   ),
                   SizedBox(height: 8),
-                  // 显示当前输入的明文（方便核对）
                   Text(
                     '当前输入: ${textController.text}',
                     style: TextStyle(
@@ -711,6 +712,36 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
           });
         },
       ),
+
+      // ====================== 【华为 Token 显示项】 ======================
+      SettingsTile(
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text("华为推送 Token"),
+            SizedBox(height: 5),
+            TextField(
+              controller: TextEditingController(text: _huaweiToken),
+              readOnly: true,
+              maxLines: 2,
+              style: TextStyle(fontSize: 12, color: Colors.grey[700]),
+              decoration: InputDecoration(
+                border: OutlineInputBorder(),
+                contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              ),
+            ),
+            SizedBox(height: 4),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(
+                onPressed: _loadHuaweiToken,
+                child: Text("刷新 Token", style: TextStyle(fontSize: 12)),
+              ),
+            )
+          ],
+        ),
+        leading: Icon(Icons.notifications_active, color: Colors.blue),
+      )
     ];
 
     if (_hasIgnoreBattery) {
@@ -1228,7 +1259,6 @@ void showLanguageSettings(OverlayDialogManager dialogManager) async {
       );
     }, backDismiss: true, clickMaskDismiss: true);
   } catch (e) {
-    // 忽略异常
   }
 }
 
