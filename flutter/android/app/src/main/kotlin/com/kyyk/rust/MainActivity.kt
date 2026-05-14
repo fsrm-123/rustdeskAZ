@@ -60,7 +60,7 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        TokenRefreshReceiver.activity = this // 加这一行
+        TokenRefreshReceiver.flutterEngine = flutterEngine // 加这一行
         if (MainService.isReady) {
             Intent(activity, MainService::class.java).also {
                 bindService(it, serviceConnection, Context.BIND_AUTO_CREATE)
