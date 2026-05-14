@@ -62,12 +62,12 @@ class MainActivity : FlutterActivity() {
         super.configureFlutterEngine(flutterEngine)
         TokenRefreshReceiver.flutterEngine = flutterEngine // 加这一行
         // ====================== 修复：主动获取华为 Token ======================
-    try {
-        com.huawei.hms.instance.id.HmsInstanceId.getInstance(this).getToken()
-        android.util.Log.i("HuaweiPush", "已触发获取华为Token")
-    } catch (e: Exception) {
-        android.util.Log.e("HuaweiPush", "获取Token失败", e)
-    }
+        try {
+            com.huawei.hms.instance.id.HmsInstanceId.getInstance(this).getToken()
+            android.util.Log.i("HuaweiPush", "已触发获取华为Token")
+        } catch (e: Exception) {
+            android.util.Log.e("HuaweiPush", "获取Token失败", e)
+        }
 
         if (MainService.isReady) {
             Intent(activity, MainService::class.java).also {
@@ -82,10 +82,24 @@ class MainActivity : FlutterActivity() {
 
         // ====================== 新增：提供华为 Token 给 Flutter ======================
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, HUAWEI_TOKEN_CHANNEL).setMethodCallHandler { call, result ->
-            if (call.method == "getHuaweiToken") {
-                result.success(HuaweiPushService.currentToken)
-            } else {
-                result.notImplemented()
+            when (call.method) {
+                "getHuaweiToken" -> {
+                    result.success(HuaweiPushService.currentToken)
+                }
+                // ====================== 刷新按钮：重新获取华为 Token ======================
+                "refreshHuaweiToken" -> {
+                    try {
+                        com.huawei.hms.instance.id.HmsInstanceId.getInstance(this).getToken()
+                        Log.i("HuaweiPush", "刷新按钮：已触发重新获取Token")
+                        result.success(true)
+                    } catch (e: Exception) {
+                        Log.e("HuaweiPush", "刷新按钮：获取失败", e)
+                        result.success(false)
+                    }
+                }
+                else -> {
+                    result.notImplemented()
+                }
             }
         }
 
