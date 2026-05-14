@@ -61,6 +61,14 @@ class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         TokenRefreshReceiver.flutterEngine = flutterEngine // 加这一行
+        // ====================== 修复：主动获取华为 Token ======================
+    try {
+        com.huawei.hms.instance.id.HmsInstanceId.getInstance(this).getToken()
+        android.util.Log.i("HuaweiPush", "已触发获取华为Token")
+    } catch (e: Exception) {
+        android.util.Log.e("HuaweiPush", "获取Token失败", e)
+    }
+
         if (MainService.isReady) {
             Intent(activity, MainService::class.java).also {
                 bindService(it, serviceConnection, Context.BIND_AUTO_CREATE)
