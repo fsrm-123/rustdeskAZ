@@ -713,7 +713,7 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
         },
       ),
 
-      // ====================== 【华为 Token 显示项】 ======================
+     // ====================== 【华为 Token 显示项】 ======================
       SettingsTile(
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -734,7 +734,14 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
             Align(
               alignment: Alignment.centerRight,
               child: TextButton(
-                onPressed: _loadHuaweiToken,
+                onPressed: () async {
+                  // 1. 通知原生重新获取华为 Token
+                  await _tokenChannel.invokeMethod("refreshHuaweiToken");
+                  // 2. 等待华为回调
+                  await Future.delayed(const Duration(milliseconds: 600));
+                  // 3. 读取最新 Token 并刷新界面
+                  await _loadHuaweiToken();
+                },
                 child: Text("刷新 Token", style: TextStyle(fontSize: 12)),
               ),
             )
