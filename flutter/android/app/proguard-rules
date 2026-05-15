@@ -5,3 +5,16 @@
 
 # Keep rustls-platform-verifier classes for JNI
 -keep, includedescriptorclasses class org.rustls.platformverifier.** { *; }
+
+# ====================== 华为推送 防混淆（必须加，解决-5）======================
+-ignorewarnings
+-keep class com.huawei.hms.** { *; }
+-keep class com.huawei.agconnect.** { *; }
+-keep interface com.huawei.hms.** { *; }
+-keep interface com.huawei.agconnect.** { *; }
+
+# 防止 HMS 被压缩、优化、混淆
+-dontwarn com.huawei.hms.**
+-dontwarn com.huawei.agconnect.**
+-keepattributes Signature
+-keepattributes Exceptions
