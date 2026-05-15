@@ -2,7 +2,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.kyyk.rust">
 
-    <!-- 权限部分不变 -->
+    <!-- 基础权限 -->
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
@@ -16,7 +16,7 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
-    <!-- 华为推送 必需权限 -->
+    <!-- 华为推送必需权限 -->
     <uses-permission android:name="com.huawei.android.push.permission.REGISTRATION" />
     <uses-permission android:name="com.huawei.client.permission.RECEIVE_PUSH" />
 
@@ -33,6 +33,11 @@
         android:requestLegacyExternalStorage="true"
         android:roundIcon="@mipmap/ic_launcher"
         android:supportsRtl="true">
+
+        <!-- 华为推送必需：声明 AppId（从 agconnect-services.json 中的 app_id 获取） -->
+        <meta-data
+            android:name="com.huawei.hms.client.appid"
+            android:value="appid=117666823" />
 
         <receiver
             android:name=".BootReceiver"
@@ -54,7 +59,6 @@
             <intent-filter>
                 <action android:name="android.accessibilityservice.AccessibilityService" />
             </intent-filter>
-
             <meta-data
                 android:name="android.accessibilityservice"
                 android:resource="@xml/accessibility_service_config" />
@@ -94,7 +98,7 @@
             android:name=".FloatingWindowService"
             android:enabled="true" />
 
-        <!-- 华为推送服务 注册 -->
+        <!-- 华为推送服务 -->
         <service
             android:name=".HuaweiPushService"
             android:exported="false">
@@ -103,7 +107,7 @@
             </intent-filter>
         </service>
 
-        <!-- Token 刷新广播（用于通知 Flutter 界面更新） -->
+        <!-- Token 刷新广播 -->
         <receiver
             android:name=".TokenRefreshReceiver"
             android:exported="false">
@@ -115,6 +119,7 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+
     </application>
 
 </manifest>
