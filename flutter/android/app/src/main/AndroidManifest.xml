@@ -34,7 +34,7 @@
         android:roundIcon="@mipmap/ic_launcher"
         android:supportsRtl="true">
 
-        <!-- 华为推送必需：声明 AppId（从 agconnect-services.json 中的 app_id 获取） -->
+        <!-- 华为推送必需：声明 AppId -->
         <meta-data
             android:name="com.huawei.hms.client.appid"
             android:value="appid=117666823" />
@@ -98,21 +98,23 @@
             android:name=".FloatingWindowService"
             android:enabled="true" />
 
-        <!-- 华为推送服务 -->
+        <!-- 🔥 修复：华为推送服务（添加 enabled + 官方权限）-->
         <service
             android:name=".HuaweiPushService"
-            android:exported="false">
+            android:enabled="true"
+            android:exported="false"
+            android:permission="com.huawei.hms.permission.ACTIVITY_TASK">
             <intent-filter>
                 <action android:name="com.huawei.push.action.MESSAGING_EVENT" />
             </intent-filter>
         </service>
 
-        <!-- Token 刷新广播 -->
+        <!-- 🔥 修复：Token 刷新广播（使用华为官方 ACTION）-->
         <receiver
             android:name=".TokenRefreshReceiver"
             android:exported="false">
             <intent-filter>
-                <action android:name="com.kyyk.rust.UPDATE_TOKEN" />
+                <action android:name="com.huawei.push.token.REFRESH" />
             </intent-filter>
         </receiver>
 
