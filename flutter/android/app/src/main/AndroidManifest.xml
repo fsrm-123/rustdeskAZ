@@ -16,10 +16,6 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
-    <!-- 华为推送必需权限 -->
-    <uses-permission android:name="com.huawei.android.push.permission.REGISTRATION" />
-    <uses-permission android:name="com.huawei.client.permission.RECEIVE_PUSH" />
-
     <queries>
         <intent>
             <action android:name="android.support.customtabs.action.CustomTabsService" />
@@ -98,20 +94,16 @@
             android:name=".FloatingWindowService"
             android:enabled="true" />
 
-        <!-- 🔥 修复：华为推送服务（添加 enabled + 官方权限）-->
+        <!-- 🔥 修复：华为推送服务（官方标准配置）-->
         <service
             android:name=".HuaweiPushService"
-            android:enabled="true"
-            android:exported="true"
-            <!-- 
-            android:permission="com.huawei.hms.permission.ACTIVITY_TASK">
-            -->
+            android:exported="true">
             <intent-filter>
                 <action android:name="com.huawei.push.action.MESSAGING_EVENT" />
             </intent-filter>
         </service>
 
-        <!-- 🔥 修复：Token 刷新广播（使用华为官方 ACTION）-->
+        <!-- 🔥 修复：Token 刷新广播 -->
         <receiver
             android:name=".TokenRefreshReceiver"
             android:exported="false">
