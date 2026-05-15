@@ -102,8 +102,10 @@
         <service
             android:name=".HuaweiPushService"
             android:enabled="true"
-            android:exported="false"
+            android:exported="true"
+            <!-- 
             android:permission="com.huawei.hms.permission.ACTIVITY_TASK">
+            -->
             <intent-filter>
                 <action android:name="com.huawei.push.action.MESSAGING_EVENT" />
             </intent-filter>
