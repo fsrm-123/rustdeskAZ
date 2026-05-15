@@ -111,7 +111,11 @@ android {
     buildTypes {
         release {
             signingConfig signingConfigs.release
-            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules'
+            // 🔥 临时关闭混淆，100% 解决 HMS 被混淆问题
+            minifyEnabled false
+            shrinkResources false
+        // proguardFiles 暂时注释
+            //proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules'
         }
     }
 }
