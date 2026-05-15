@@ -16,7 +16,9 @@ import android.content.ServiceConnection
 import android.content.ClipboardManager
 import android.os.Bundle
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.util.Log
 import android.view.WindowManager
 import android.media.MediaCodecInfo
@@ -34,8 +36,8 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import kotlin.concurrent.thread
 
-// ============== 修复：正确导入华为 HMS ==============
-import com.huawei.hms.aaid.HmsInstanceId;
+// ============== 华为 HMS ==============
+import com.huawei.hms.aaid.HmsInstanceId
 
 class MainActivity : FlutterActivity() {
     companion object {
@@ -43,14 +45,14 @@ class MainActivity : FlutterActivity() {
         var flutterMethodChannel: MethodChannel? = null
         private var _rdClipboardManager: RdClipboardManager? = null
         val rdClipboardManager: RdClipboardManager?
-            get() = _rdClipboardManager;
+            get() = _rdClipboardManager
             
         // 密码存储常量
         const val UNLOCK_PREFS_NAME = "rustdesk_unlock_config"
         const val PREFS_KEY_UNLOCK_PASSWORD = "screen_unlock_password"
     }
 
-    // ====================== 新增：华为 Token 通道 ======================
+    // ====================== 华为 Token 通道 ======================
     private val HUAWEI_TOKEN_CHANNEL = "com.kyyk.rust/huawei_token"
 
     private val channelTag = "mChannel"
@@ -60,38 +62,49 @@ class MainActivity : FlutterActivity() {
     private var isAudioStart = false
     private val audioRecordHandle = AudioRecordHandle(this, { false }, { isAudioStart })
 
-    override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
-        super.configureFlutterEngine(flutterEngine)
-        TokenRefreshReceiver.flutterEngine = flutterEngine // 加这一行
-        // ====================== 修复：正确获取华为 Token ======================
-        try {
-            HmsInstanceId.getInstance(this).getToken()
-            android.util.Log.i("HuaweiPush", "已触发获取华为Token")
-        } catch (e: Exception) {
-            android.util.Log.e("HuaweiPush", "获取Token失败", e)
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+
+        // 初始化剪贴板管理器
+        if (_rdClipboardManager == null) {
+            _rdClipboardManager = RdClipboardManager(getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
+            FFI.setClipboardManager(_rdClipboardManager!!)
         }
 
+        // 延迟请求华为推送 Token，确保 HMS Core 服务已连接
+        Handler(Looper.getMainLooper()).postDelayed({
+            requestHuaweiToken()
+        }, 1000)
+    }
+
+    override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+        super.configureFlutterEngine(flutterEngine)
+        TokenRefreshReceiver.flutterEngine = flutterEngine
+
+        // 注意：主动请求 Token 已移到 onCreate 中，这里不再重复调用
+        // 保留服务绑定等其他逻辑
         if (MainService.isReady) {
             Intent(activity, MainService::class.java).also {
                 bindService(it, serviceConnection, Context.BIND_AUTO_CREATE)
             }
         }
+
         flutterMethodChannel = MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             channelTag
         )
         initFlutterChannel(flutterMethodChannel!!)
 
-        // ====================== 新增：提供华为 Token 给 Flutter ======================
+        // 提供华为 Token 给 Flutter 以及刷新功能
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, HUAWEI_TOKEN_CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
                 "getHuaweiToken" -> {
                     result.success(HuaweiPushService.currentToken)
                 }
-                // ====================== 刷新按钮：重新获取华为 Token ======================
                 "refreshHuaweiToken" -> {
                     try {
-                        HmsInstanceId.getInstance(this).getToken()
+                        // 刷新时重新请求 Token
+                        HmsInstanceId.getInstance(this).getToken("HCM", null)
                         Log.i("HuaweiPush", "刷新按钮：已触发重新获取Token")
                         result.success(true)
                     } catch (e: Exception) {
@@ -110,6 +123,21 @@ class MainActivity : FlutterActivity() {
                 setCodecInfo()
             } catch (e: Exception) {
                 Log.e("MainActivity", "Failed to setCodecInfo: ${e.message}", e)
+            }
+        }
+    }
+
+    /**
+     * 主动请求华为推送 Token（在子线程中执行）
+     */
+    private fun requestHuaweiToken() {
+        thread {
+            try {
+                // 使用带 Scope 的重载，明确请求 HCM 类型 Token
+                HmsInstanceId.getInstance(this).getToken("HCM", null)
+                Log.i("HuaweiPush", "已触发获取华为Token（HCM）")
+            } catch (e: Exception) {
+                Log.e("HuaweiPush", "请求Token异常", e)
             }
         }
     }
@@ -139,18 +167,6 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-
-        // ====================== 已删除：悬浮窗代码 ======================
-        // TokenDisplayManager.init(this)
-
-        if (_rdClipboardManager == null) {
-            _rdClipboardManager = RdClipboardManager(getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
-            FFI.setClipboardManager(_rdClipboardManager!!)
-        }
-    }
-
     override fun onDestroy() {
         Log.e(logTag, "onDestroy")
         mainService?.let {
@@ -174,7 +190,6 @@ class MainActivity : FlutterActivity() {
 
     private fun initFlutterChannel(flutterMethodChannel: MethodChannel) {
         flutterMethodChannel.setMethodCallHandler { call, result ->
-            // make sure result will be invoked, otherwise flutter will await forever
             when (call.method) {
                 "init_service" -> {
                     Intent(activity, MainService::class.java).also {
@@ -270,7 +285,6 @@ class MainActivity : FlutterActivity() {
                         window.addFlags(WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM)
                     }
                     result.success(true)
-
                 }
                 "try_sync_clipboard" -> {
                     rdClipboardManager?.syncClipboard(true)
@@ -321,7 +335,6 @@ class MainActivity : FlutterActivity() {
                     onVoiceCallClosed()
                     result.success(true)
                 }
-                // ====================== 密码解锁方法（稳定兼容版） ======================
                 "save_unlock_password" -> {
                     val password = call.argument<String>("password") ?: ""
                     try {
@@ -368,7 +381,7 @@ class MainActivity : FlutterActivity() {
             val codecObject = JSONObject()
             codecObject.put("name", codec.name)
             codecObject.put("is_encoder", codec.isEncoder)
-            var hw: Boolean? = null;
+            var hw: Boolean? = null
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 hw = codec.isHardwareAccelerated
             } else {
@@ -385,14 +398,14 @@ class MainActivity : FlutterActivity() {
             var mime_type = ""
             codec.supportedTypes.forEach { type ->
                 if (listOf("video/avc", "video/hevc").contains(type)) {
-                    mime_type = type;
+                    mime_type = type
                 }
             }
             if (mime_type.isNotEmpty()) {
                 codecObject.put("mime_type", mime_type)
                 val caps = codec.getCapabilitiesForType(mime_type)
                 if (codec.isEncoder) {
-                    if (!caps.videoCapabilities.isSizeSupported(w,h) && !caps.videoCapabilities.isSizeSupported(h,w)) {
+                    if (!caps.videoCapabilities.isSizeSupported(w, h) && !caps.videoCapabilities.isSizeSupported(h, w)) {
                         return@forEach
                     }
                 }
@@ -400,7 +413,7 @@ class MainActivity : FlutterActivity() {
                 codecObject.put("max_width", caps.videoCapabilities.supportedWidths.upper)
                 codecObject.put("min_height", caps.videoCapabilities.supportedHeights.lower)
                 codecObject.put("max_height", caps.videoCapabilities.supportedHeights.upper)
-                val surface = caps.colorFormats.contains(COLOR_FormatSurface);
+                val surface = caps.colorFormats.contains(COLOR_FormatSurface)
                 codecObject.put("surface", surface)
                 val nv12 = caps.colorFormats.contains(COLOR_FormatYUV420SemiPlanar)
                 codecObject.put("nv12", nv12)
@@ -438,10 +451,14 @@ class MainActivity : FlutterActivity() {
         }
         if (!ok) {
             Log.e(logTag, "onVoiceCallStarted fail")
-            flutterMethodChannel?.invokeMethod("msgbox", mapOf(
-                "type" to "custom-nook-nocancel-hasclose-error",
-                "title" to "Voice call",
-                "text" to "Failed to start voice call."))
+            flutterMethodChannel?.invokeMethod(
+                "msgbox",
+                mapOf(
+                    "type" to "custom-nook-nocancel-hasclose-error",
+                    "title" to "Voice call",
+                    "text" to "Failed to start voice call."
+                )
+            )
         } else {
             Log.d(logTag, "onVoiceCallStarted success")
         }
@@ -457,10 +474,14 @@ class MainActivity : FlutterActivity() {
         }
         if (!ok) {
             Log.e(logTag, "onVoiceCallClosed fail")
-            flutterMethodChannel?.invokeMethod("msgbox", mapOf(
-                "type" to "custom-nook-nocancel-hasclose-error",
-                "title" to "Voice call",
-                "text" to "Failed to stop voice call."))
+            flutterMethodChannel?.invokeMethod(
+                "msgbox",
+                mapOf(
+                    "type" to "custom-nook-nocancel-hasclose-error",
+                    "title" to "Voice call",
+                    "text" to "Failed to stop voice call."
+                )
+            )
         } else {
             Log.d(logTag, "onVoiceCallClosed success")
         }
