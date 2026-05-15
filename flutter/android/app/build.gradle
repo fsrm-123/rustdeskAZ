@@ -1,8 +1,6 @@
 import com.google.protobuf.gradle.*
 import groovy.json.JsonSlurper
 
-
-
 plugins {
     id "com.google.protobuf" version "0.9.4"
     id "com.android.application"
@@ -101,10 +99,8 @@ android {
         versionName flutterVersionName
     }
 
-    // ====================== 签名配置 对齐GitHub Secrets ======================
    signingConfigs {
     release {
-        // 适配你现有的 GitHub Secrets 变量名
         storeFile file(System.getenv("RELEASE_STORE_FILE"))
         storePassword System.getenv("KEYSTORE_PASSWORD")
         keyAlias System.getenv("KEY_ALIAS")
@@ -128,11 +124,13 @@ dependencies {
     implementation 'com.google.protobuf:protobuf-javalite:3.20.1'
     implementation "androidx.media:media:1.6.0"
     implementation 'com.github.getActivity:XXPermissions:18.5'
-    // 已适配 Kotlin 2.0.21
     implementation "org.jetbrains.kotlin:kotlin-stdlib:2.0.21"
     implementation "com.caverock:androidsvg-aar:1.4"
     implementation "rustls:rustls-platform-verifier:0.1.1"
 
     implementation 'com.huawei.agconnect:agconnect-core:1.9.1.300'
     implementation 'com.huawei.hms:push:6.12.0.300'
+
+    // 🔥 已正确添加
+    implementation 'org.bouncycastle:bcprov-jdk15on:1.70'
 }
