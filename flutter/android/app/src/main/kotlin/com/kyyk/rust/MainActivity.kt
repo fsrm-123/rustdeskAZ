@@ -38,6 +38,7 @@ import kotlin.concurrent.thread
 
 // ============== 华为 HMS ==============
 import com.huawei.hms.aaid.HmsInstanceId
+import com.huawei.hms.push.HmsMessaging
 
 class MainActivity : FlutterActivity() {
     companion object {
@@ -81,7 +82,6 @@ class MainActivity : FlutterActivity() {
         super.configureFlutterEngine(flutterEngine)
         TokenRefreshReceiver.flutterEngine = flutterEngine
 
-        // 注意：主动请求 Token 已移到 onCreate 中，这里不再重复调用
         // 保留服务绑定等其他逻辑
         if (MainService.isReady) {
             Intent(activity, MainService::class.java).also {
@@ -95,7 +95,7 @@ class MainActivity : FlutterActivity() {
         )
         initFlutterChannel(flutterMethodChannel!!)
 
-        // 提供华为 Token 给 Flutter 以及刷新功能
+        // ====================== 修复：华为 Token 方法通道（完整正确版） ======================
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, HUAWEI_TOKEN_CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
                 "getHuaweiToken" -> {
@@ -103,9 +103,17 @@ class MainActivity : FlutterActivity() {
                 }
                 "refreshHuaweiToken" -> {
                     try {
-                        // 刷新时重新请求 Token
-                        HmsInstanceId.getInstance(this).getToken("HCM", null)
-                        Log.i("HuaweiPush", "刷新按钮：已触发重新获取Token")
+                        // 修复：必须在子线程请求 Token
+                        thread {
+                            try {
+                                val appId = applicationInfo.metaData.getString("com.huawei.hms.client.appid") ?: ""
+                                val cleanAppId = appId.replace("appid=", "")
+                                HmsInstanceId.getInstance(this@MainActivity).getToken(cleanAppId, HmsMessaging.DEFAULT_TOKEN_SCOPE)
+                                Log.i("HuaweiPush", "刷新按钮：已触发重新获取Token")
+                            } catch (e: Exception) {
+                                Log.e("HuaweiPush", "刷新按钮：子线程获取失败", e)
+                            }
+                        }
                         result.success(true)
                     } catch (e: Exception) {
                         Log.e("HuaweiPush", "刷新按钮：获取失败", e)
@@ -128,14 +136,15 @@ class MainActivity : FlutterActivity() {
     }
 
     /**
-     * 主动请求华为推送 Token（在子线程中执行）
+     * 主动请求华为推送 Token（修复：子线程 + 正确参数）
      */
     private fun requestHuaweiToken() {
         thread {
             try {
-                // 使用带 Scope 的重载，明确请求 HCM 类型 Token
-                HmsInstanceId.getInstance(this).getToken("HCM", null)
-                Log.i("HuaweiPush", "已触发获取华为Token（HCM）")
+                val appId = applicationInfo.metaData.getString("com.huawei.hms.client.appid") ?: ""
+                val cleanAppId = appId.replace("appid=", "")
+                HmsInstanceId.getInstance(this).getToken(cleanAppId, HmsMessaging.DEFAULT_TOKEN_SCOPE)
+                Log.i("HuaweiPush", "已触发获取华为Token（自动初始化）")
             } catch (e: Exception) {
                 Log.e("HuaweiPush", "请求Token异常", e)
             }
@@ -316,7 +325,7 @@ class MainActivity : FlutterActivity() {
                         result.success(false)
                     }
                 }
-                GET_VALUE -> {
+                "get_value" -> {
                     if (call.arguments is String) {
                         if (call.arguments == KEY_IS_SUPPORT_VOICE_CALL) {
                             result.success(isSupportVoiceCall())
