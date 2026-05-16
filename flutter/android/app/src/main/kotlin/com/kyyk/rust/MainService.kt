@@ -46,10 +46,8 @@ import java.nio.ByteBuffer
 import kotlin.math.max
 import kotlin.math.min
 
-// ========== 常量定义（必须与 MainActivity 和 PermissionRequestTransparentActivity 中的值完全一致）==========
-const val ACT_INIT_MEDIA_PROJECTION_AND_SERVICE = "ACT_INIT_MEDIA_PROJECTION_AND_SERVICE"
-const val EXT_MEDIA_PROJECTION_RES_INTENT = "EXT_MEDIA_PROJECTION_RES_INTENT"
-const val ACT_REQUEST_MEDIA_PROJECTION = "ACT_REQUEST_MEDIA_PROJECTION"
+// 注意：以下常量定义已删除，统一使用 MainActivity 中的定义
+// 不再有 ACT_INIT_MEDIA_PROJECTION_AND_SERVICE, EXT_MEDIA_PROJECTION_RES_INTENT, ACT_REQUEST_MEDIA_PROJECTION
 
 const val DEFAULT_NOTIFY_TITLE = "RustDesk"
 const val DEFAULT_NOTIFY_TEXT = "Service is running"
@@ -329,8 +327,8 @@ class MainService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Log.d("whichService", "this service: ${Thread.currentThread()}")
         super.onStartCommand(intent, flags, startId)
-        // 使用常量进行 action 判断
-        if (intent?.action == ACT_INIT_MEDIA_PROJECTION_AND_SERVICE) {
+        // 使用 MainActivity 中的常量进行 action 判断
+        if (intent?.action == MainActivity.ACT_INIT_MEDIA_PROJECTION_AND_SERVICE) {
             createForegroundNotification()
 
             if (intent.getBooleanExtra(EXT_INIT_FROM_BOOT, false)) {
@@ -340,7 +338,7 @@ class MainService : Service() {
             val mediaProjectionManager =
                 getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
 
-            intent.getParcelableExtra<Intent>(EXT_MEDIA_PROJECTION_RES_INTENT)?.let {
+            intent.getParcelableExtra<Intent>(MainActivity.EXT_MEDIA_PROJECTION_RES_INTENT)?.let {
                 mediaProjection =
                     mediaProjectionManager.getMediaProjection(Activity.RESULT_OK, it)
                 checkMediaPermission()
@@ -360,7 +358,7 @@ class MainService : Service() {
 
     private fun requestMediaProjection() {
         val intent = Intent(this, PermissionRequestTransparentActivity::class.java).apply {
-            action = ACT_REQUEST_MEDIA_PROJECTION
+            action = MainActivity.ACT_REQUEST_MEDIA_PROJECTION
             flags = Intent.FLAG_ACTIVITY_NEW_TASK
         }
         startActivity(intent)
