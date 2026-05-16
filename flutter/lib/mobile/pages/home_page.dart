@@ -9,9 +9,6 @@ import '../../models/platform_model.dart';
 import '../../models/state_model.dart';
 import 'connection_page.dart';
 
-// ====================== 新增 ======================
-import 'package:flutter/services.dart';
-
 abstract class PageShape extends Widget {
   final String title = "";
   final Widget icon = Icon(null);
@@ -28,39 +25,6 @@ class HomePage extends StatefulWidget {
 }
 
 class HomePageState extends State<HomePage> {
-
-  // ====================== 新增：推送发送相关 ======================
-  static const platform = MethodChannel('com.kyyk.rust/push_sender');
-  final TextEditingController _tokenController = TextEditingController();
-  bool _isSending = false;
-
-  Future<void> _sendPush(String command) async {
-    final targetToken = _tokenController.text.trim();
-    if (targetToken.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("请输入目标设备TOKEN")),
-      );
-      return;
-    }
-
-    setState(() => _isSending = true);
-    try {
-      await platform.invokeMethod('sendPushCommand', {
-        'targetToken': targetToken,
-        'command': command,
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("指令「$command」发送成功")),
-      );
-    } on PlatformException catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("发送失败：${e.message}")),
-      );
-    } finally {
-      setState(() => _isSending = false);
-    }
-  }
-
   var _selectedIndex = 0;
   int get selectedIndex => _selectedIndex;
   final List<PageShape> _pages = [];
@@ -136,51 +100,7 @@ class HomePageState extends State<HomePage> {
               }
             }),
           ),
-
-          // ====================== 关键：把 body 改成 Column ======================
-          body: Column(
-            children: [
-              Expanded(child: _pages.elementAt(_selectedIndex)),
-
-              // ====================== 新增：推送控制面板 ======================
-              if (isAndroid)
-                Container(
-                  padding: EdgeInsets.all(12),
-                  color: Colors.grey[50],
-                  child: Column(
-                    children: [
-                      TextField(
-                        controller: _tokenController,
-                        enabled: !_isSending,
-                        decoration: InputDecoration(
-                          hintText: "目标设备推送TOKEN",
-                          border: OutlineInputBorder(),
-                          contentPadding: EdgeInsets.symmetric(horizontal: 10),
-                        ),
-                      ),
-                      SizedBox(height: 8),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: ElevatedButton(
-                              onPressed: _isSending ? null : () => _sendPush("解锁"),
-                              child: Text("解锁"),
-                            ),
-                          ),
-                          SizedBox(width: 10),
-                          Expanded(
-                            child: ElevatedButton(
-                              onPressed: _isSending ? null : () => _sendPush("咫尺"),
-                              child: Text("开启"),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-            ],
-          ),
+          body: _pages.elementAt(_selectedIndex),
         ));
   }
 
