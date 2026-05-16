@@ -160,7 +160,7 @@ class InputService : AccessibilityService() {
 
     // ======================== 修改：参考 Java 代码的解锁流程 ========================
     // 尝试解锁屏幕（带冷却期管理）
-    private fun tryUnlockScreen(): Boolean {
+    fun tryUnlockScreen(): Boolean {
         // 屏幕已解锁，无需操作
         if (!checkScreenLocked()) {
             return true
@@ -290,7 +290,7 @@ class InputService : AccessibilityService() {
             .build()
         
         dispatchGesture(gesture, null, null)
-        Log.d(logTag, "执行上滑解锁，等待 ${SWIPE_UP_DELAY_MS}ms 让密码界面出现")
+        Log.d(logTag, "执行上滑解锁，等待 ${SWIPE_UP_DELAY_MS} 让密码界面出现")
     }
 
     // ======================== 修改：简化密码输入，移除复杂锁机制 ========================
@@ -449,8 +449,8 @@ class InputService : AccessibilityService() {
         rootNode.recycle()
     }
 
-    // ====================== 【新增】智能点击扩展方法（private，格式完全对齐） ======================
-    private fun performSwipeRaw(fromX: Int, fromY: Int, toX: Int, toY: Int, duration: Long) {
+    // ====================== 【新增】智能点击扩展方法 ======================
+    fun performSwipeRaw(fromX: Int, fromY: Int, toX: Int, toY: Int, duration: Long) {
         val path = Path()
         path.moveTo(fromX.toFloat(), fromY.toFloat())
         path.lineTo(toX.toFloat(), toY.toFloat())
@@ -460,7 +460,7 @@ class InputService : AccessibilityService() {
         dispatchGesture(gesture, null, null)
     }
 
-    private fun collectAllNodes(node: AccessibilityNodeInfo?, list: MutableList<AccessibilityNodeInfo>) {
+    fun collectAllNodes(node: AccessibilityNodeInfo?, list: MutableList<AccessibilityNodeInfo>) {
         if (node == null) return
         list.add(AccessibilityNodeInfo.obtain(node))
         for (i in 0 until node.childCount) {
