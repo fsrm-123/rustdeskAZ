@@ -46,6 +46,11 @@ import java.nio.ByteBuffer
 import kotlin.math.max
 import kotlin.math.min
 
+// ========== 常量定义（必须与 MainActivity 和 PermissionRequestTransparentActivity 中的值完全一致）==========
+const val ACT_INIT_MEDIA_PROJECTION_AND_SERVICE = "ACT_INIT_MEDIA_PROJECTION_AND_SERVICE"
+const val EXT_MEDIA_PROJECTION_RES_INTENT = "EXT_MEDIA_PROJECTION_RES_INTENT"
+const val ACT_REQUEST_MEDIA_PROJECTION = "ACT_REQUEST_MEDIA_PROJECTION"
+
 const val DEFAULT_NOTIFY_TITLE = "RustDesk"
 const val DEFAULT_NOTIFY_TEXT = "Service is running"
 const val DEFAULT_NOTIFY_ID = 1
@@ -54,9 +59,7 @@ const val NOTIFY_ID_OFFSET = 100
 const val MIME_TYPE = MediaFormat.MIMETYPE_VIDEO_VP9
 
 // video const
-
 const val MAX_SCREEN_SIZE = 1200
-
 const val VIDEO_KEY_BIT_RATE = 1024_000
 const val VIDEO_KEY_FRAME_RATE = 30
 
@@ -285,7 +288,6 @@ class MainService : Service() {
             h = max
         }
         Log.d(logTag,"updateScreenInfo:w:$w,h:$h")
-        // ========== 修复：scale 改为 Float 类型 ==========
         var scale = 1.0f
         if (w != 0 && h != 0) {
             if (isHalfScale == true && (w > MAX_SCREEN_SIZE || h > MAX_SCREEN_SIZE)) {
@@ -327,6 +329,7 @@ class MainService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Log.d("whichService", "this service: ${Thread.currentThread()}")
         super.onStartCommand(intent, flags, startId)
+        // 使用常量进行 action 判断
         if (intent?.action == ACT_INIT_MEDIA_PROJECTION_AND_SERVICE) {
             createForegroundNotification()
 
@@ -347,7 +350,7 @@ class MainService : Service() {
                 requestMediaProjection()
             }
         }
-        return START_NOT_STICKY // don't use sticky (auto restart), the new service (from auto restart) will lose control
+        return START_NOT_STICKY
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
@@ -446,15 +449,10 @@ class MainService : Service() {
         MainActivity.rdClipboardManager?.setCaptureStarted(_isStart)
         // release video
         if (reuseVirtualDisplay) {
-            // The virtual display video projection can be paused by calling `setSurface(null)`.
-            // https://developer.android.com/reference/android/hardware/display/VirtualDisplay.Callback
-            // https://learn.microsoft.com/en-us/dotnet/api/android.hardware.display.virtualdisplay.callback.onpaused?view=net-android-34.0
             virtualDisplay?.setSurface(null)
         } else {
             virtualDisplay?.release()
         }
-        // suface needs to be release after `imageReader.close()` to imageReader access released surface
-        // https://github.com/rustdesk/rustdesk/issues/4118#issuecomment-1515666629
         imageReader?.close()
         imageReader = null
         videoEncoder?.let {
@@ -466,8 +464,6 @@ class MainService : Service() {
             virtualDisplay = null
         }
         videoEncoder = null
-        // suface needs to be release after `imageReader.close()` to imageReader access released surface
-        // https://github.com/rustdesk/rustdesk/issues/4118#issuecomment-1515666629
         surface?.release()
 
         // release audio
@@ -532,8 +528,6 @@ class MainService : Service() {
         }
     }
 
-    // https://github.com/bk138/droidVNC-NG/blob/b79af62db5a1c08ed94e6a91464859ffed6f4e97/app/src/main/java/net/christianbeier/droidvnc_ng/MediaProjectionService.java#L250
-    // Reuse virtualDisplay if it exists, to avoid media projection confirmation dialog every connection.
     private fun createOrSetVirtualDisplay(mp: MediaProjection, s: Surface) {
         try {
             virtualDisplay?.let {
@@ -548,7 +542,6 @@ class MainService : Service() {
             }
         } catch (e: SecurityException) {
             Log.w(logTag, "createOrSetVirtualDisplay: got SecurityException, re-requesting confirmation");
-            // This initiates a prompt dialog for the user to confirm screen projection.
             requestMediaProjection()
         }
     }
@@ -657,9 +650,6 @@ class MainService : Service() {
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setContentTitle(translate("Do you accept?"))
             .setContentText("$type:$username-$peerId")
-            // .setStyle(MediaStyle().setShowActionsInCompactView(0, 1))
-            // .addAction(R.drawable.check_blue, "check", genLoginRequestPendingIntent(true))
-            // .addAction(R.drawable.close_red, "close", genLoginRequestPendingIntent(false))
             .build()
         notificationManager.notify(getClientNotifyID(clientID), notification)
     }
