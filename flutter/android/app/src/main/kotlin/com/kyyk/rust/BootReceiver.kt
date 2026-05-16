@@ -11,7 +11,8 @@ import android.widget.Toast
 import com.hjq.permissions.XXPermissions
 import io.flutter.embedding.android.FlutterActivity
 
-const val DEBUG_BOOT_COMPLETED = "com.carriez.flutter_hbb.DEBUG_BOOT_COMPLETED"
+// 修改：将旧包名改为新包名
+const val DEBUG_BOOT_COMPLETED = "com.kyyk.rust.DEBUG_BOOT_COMPLETED"
 
 class BootReceiver : BroadcastReceiver() {
     private val logTag = "tagBootReceiver"
@@ -33,7 +34,8 @@ class BootReceiver : BroadcastReceiver() {
             }
 
             val it = Intent(context, MainService::class.java).apply {
-                action = ACT_INIT_MEDIA_PROJECTION_AND_SERVICE
+                // 修改：使用 MainActivity 中的常量
+                action = MainActivity.ACT_INIT_MEDIA_PROJECTION_AND_SERVICE
                 putExtra(EXT_INIT_FROM_BOOT, true)
             }
             Toast.makeText(context, "RustDesk is Open", Toast.LENGTH_LONG).show()
