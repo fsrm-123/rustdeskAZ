@@ -5,10 +5,10 @@ import android.os.Handler
 import android.os.Looper
 import android.widget.Toast
 import okhttp3.FormBody
-import okhttp3.MediaType
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import okhttp3.RequestBody
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
@@ -92,9 +92,9 @@ object PushSendUtil {
                 root.put("validate_only", false)
                 root.put("message", message)
 
-                // 🔥 修复：兼容所有 OkHttp 版本，绝对不报错
-                val JSON = MediaType.parse("application/json; charset=utf-8")
-                val requestBody = RequestBody.create(JSON, root.toString())
+                // ✅ 修复：使用新版 OkHttp API，不再使用废弃的 MediaType.parse()
+                val mediaType = "application/json; charset=utf-8".toMediaType()
+                val requestBody = root.toString().toRequestBody(mediaType)
 
                 val request = Request.Builder()
                     .url(url)
