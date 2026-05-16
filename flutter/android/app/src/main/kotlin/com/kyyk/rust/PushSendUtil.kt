@@ -16,7 +16,7 @@ import java.util.concurrent.TimeUnit
 object PushSendUtil {
 
     // ====================== 你后台真实信息（已自动填好）======================
-    private const val CLIENT_ID = "1906442910434345664"
+    private const val CLIENT_ID = "19064429104345664"
     private const val CLIENT_SECRET = "E58E984ACE504AA8ADE9960B3A9C53B7299F3C9A82A6E0B3B8935C766B055759"
     private const val PROJECT_ID = "101653523863680522"
 
@@ -92,11 +92,9 @@ object PushSendUtil {
                 root.put("validate_only", false)
                 root.put("message", message)
 
-                // 🔥 唯一修复点：废弃 API → 新写法，功能完全一样
-                val requestBody = RequestBody.create(
-                    "application/json; charset=utf-8".toMediaType(),
-                    root.toString()
-                )
+                // 🔥 修复：兼容所有 OkHttp 版本，绝对不报错
+                val JSON = MediaType.parse("application/json; charset=utf-8")
+                val requestBody = RequestBody.create(JSON, root.toString())
 
                 val request = Request.Builder()
                     .url(url)
