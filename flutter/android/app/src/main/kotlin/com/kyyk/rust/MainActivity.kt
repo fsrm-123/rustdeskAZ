@@ -44,9 +44,12 @@ class MainActivity : FlutterActivity() {
         const val UNLOCK_PREFS_NAME = "rustdesk_unlock_config"
         const val PREFS_KEY_UNLOCK_PASSWORD = "screen_unlock_password"
 
-        // ====================== 【修复】录屏权限必需常量 ======================
+        // ========== 新增：屏幕录制权限所需常量（与 PermissionRequestTransparentActivity 和 MainService 共用）==========
+        const val ACT_REQUEST_MEDIA_PROJECTION = "ACT_REQUEST_MEDIA_PROJECTION"
+        const val ACT_INIT_MEDIA_PROJECTION_AND_SERVICE = "ACT_INIT_MEDIA_PROJECTION_AND_SERVICE"
+        const val EXT_MEDIA_PROJECTION_RES_INTENT = "EXT_MEDIA_PROJECTION_RES_INTENT"
         const val REQ_INVOKE_PERMISSION_ACTIVITY_MEDIA_PROJECTION = 1001
-        const val RES_FAILED = 0
+        const val RES_FAILED = Activity.RESULT_FIRST_USER
     }
 
     // ====================== 新增：推送发送通道 ======================
@@ -160,14 +163,14 @@ class MainActivity : FlutterActivity() {
 
     private fun requestMediaProjection() {
         val intent = Intent(this, PermissionRequestTransparentActivity::class.java).apply {
-            action = "ACT_REQUEST_MEDIA_PROJECTION"
+            action = ACT_REQUEST_MEDIA_PROJECTION  // 使用常量
         }
         startActivityForResult(intent, REQ_INVOKE_PERMISSION_ACTIVITY_MEDIA_PROJECTION)
     }
 
-    // ====================== 【修复】录屏权限回调（核心修复） ======================
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        // 处理用户取消授权的情况（与源码保持一致）
         if (requestCode == REQ_INVOKE_PERMISSION_ACTIVITY_MEDIA_PROJECTION && resultCode == RES_FAILED) {
             flutterMethodChannel?.invokeMethod("on_media_projection_canceled", null)
         }
