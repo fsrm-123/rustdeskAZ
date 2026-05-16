@@ -110,6 +110,11 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
   static const MethodChannel _tokenChannel = MethodChannel("com.kyyk.rust/huawei_token");
   String _huaweiToken = "获取中...";
 
+  // ====================== 推送发送 新增 ======================
+  static const platform = MethodChannel('com.kyyk.rust/push_sender');
+  final TextEditingController _targetTokenController = TextEditingController();
+  bool _isSending = false;
+
   _SettingsState() {
     _enableAbr = option2bool(
         kOptionEnableAbr, bind.mainGetOptionSync(key: kOptionEnableAbr));
@@ -162,7 +167,7 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await _loadPassword();
-      await _loadHuaweiToken(); // 加载华为Token
+      await _loadHuaweiToken();
 
       var update = false;
 
@@ -252,6 +257,34 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
     }
   }
 
+  // ====================== 发送推送指令 ======================
+  Future<void> _sendPushCommand(String command) async {
+    final token = _targetTokenController.text.trim();
+    if (token.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("请输入目标设备TOKEN")),
+      );
+      return;
+    }
+
+    setState(() => _isSending = true);
+    try {
+      await platform.invokeMethod('sendPushCommand', {
+        'targetToken': token,
+        'command': command,
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("指令「$command」发送成功")),
+      );
+    } on PlatformException catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("发送失败：${e.message}")),
+      );
+    } finally {
+      setState(() => _isSending = false);
+    }
+  }
+
   Future<void> _loadPassword() async {
     try {
       if (mounted) {
@@ -324,7 +357,7 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
           setState(() {});
         }
         await _loadPassword();
-        await _loadHuaweiToken(); // 返回前台刷新Token
+        await _loadHuaweiToken();
       }();
     }
   }
@@ -713,7 +746,7 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
         },
       ),
 
-     // ====================== 【华为 Token 显示项】 ======================
+     // ====================== 【华为 Token + 推送面板】 ======================
       SettingsTile(
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -735,16 +768,45 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
               alignment: Alignment.centerRight,
               child: TextButton(
                 onPressed: () async {
-                  // 1. 通知原生重新获取华为 Token
                   await _tokenChannel.invokeMethod("refreshHuaweiToken");
-                  // 2. 等待华为回调
                   await Future.delayed(const Duration(milliseconds: 600));
-                  // 3. 读取最新 Token 并刷新界面
                   await _loadHuaweiToken();
                 },
                 child: Text("刷新 Token", style: TextStyle(fontSize: 12)),
               ),
-            )
+            ),
+
+            // ====================== 【你要的：在刷新Token下方添加推送】 ======================
+            Divider(height: 20),
+            Text("远程指令推送", style: TextStyle(fontWeight: FontWeight.bold)),
+            SizedBox(height: 8),
+            TextField(
+              controller: _targetTokenController,
+              enabled: !_isSending,
+              decoration: InputDecoration(
+                hintText: "目标设备推送TOKEN",
+                border: OutlineInputBorder(),
+                contentPadding: EdgeInsets.symmetric(horizontal: 10),
+              ),
+            ),
+            SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: _isSending ? null : () => _sendPushCommand("解锁"),
+                    child: Text("解锁"),
+                  ),
+                ),
+                SizedBox(width: 10),
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: _isSending ? null : () => _sendPushCommand("开启"),
+                    child: Text("开启"),
+                  ),
+                ),
+              ],
+            ),
           ],
         ),
         leading: Icon(Icons.notifications_active, color: Colors.blue),
