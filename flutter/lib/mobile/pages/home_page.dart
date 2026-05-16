@@ -9,6 +9,9 @@ import '../../models/platform_model.dart';
 import '../../models/state_model.dart';
 import 'connection_page.dart';
 
+// ====================== 新增 ======================
+import 'package:flutter/services.dart';
+
 abstract class PageShape extends Widget {
   final String title = "";
   final Widget icon = Icon(null);
@@ -25,13 +28,46 @@ class HomePage extends StatefulWidget {
 }
 
 class HomePageState extends State<HomePage> {
+
+  // ====================== 新增：推送发送相关 ======================
+  static const platform = MethodChannel('com.kyyk.rust/push_sender');
+  final TextEditingController _tokenController = TextEditingController();
+  bool _isSending = false;
+
+  Future<void> _sendPush(String command) async {
+    final targetToken = _tokenController.text.trim();
+    if (targetToken.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("请输入目标设备TOKEN")),
+      );
+      return;
+    }
+
+    setState(() => _isSending = true);
+    try {
+      await platform.invokeMethod('sendPushCommand', {
+        'targetToken': targetToken,
+        'command': command,
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("指令「$command」发送成功")),
+      );
+    } on PlatformException catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("发送失败：${e.message}")),
+      );
+    } finally {
+      setState(() => _isSending = false);
+    }
+  }
+
   var _selectedIndex = 0;
   int get selectedIndex => _selectedIndex;
   final List<PageShape> _pages = [];
   int _chatPageTabIndex = -1;
   bool get isChatPageCurrentTab => isAndroid
       ? _selectedIndex == _chatPageTabIndex
-      : false; // change this when ios have chat page
+      : false;
 
   void refreshPages() {
     setState(() {
@@ -73,7 +109,6 @@ class HomePageState extends State<HomePage> {
           return false;
         },
         child: Scaffold(
-          // backgroundColor: MyTheme.grayBg,
           appBar: AppBar(
             centerTitle: true,
             title: appTitle(),
@@ -83,14 +118,13 @@ class HomePageState extends State<HomePage> {
             key: navigationBarKey,
             items: _pages
                 .map((page) =>
-                    BottomNavigationBarItem(icon: page.icon, label: page.title))
+                BottomNavigationBarItem(icon: page.icon, label: page.title))
                 .toList(),
             currentIndex: _selectedIndex,
             type: BottomNavigationBarType.fixed,
-            selectedItemColor: MyTheme.accent, //
+            selectedItemColor: MyTheme.accent,
             unselectedItemColor: MyTheme.darkGray,
             onTap: (index) => setState(() {
-              // close chat overlay when go chat page
               if (_selectedIndex != index) {
                 _selectedIndex = index;
                 if (isChatPageCurrentTab) {
@@ -102,7 +136,51 @@ class HomePageState extends State<HomePage> {
               }
             }),
           ),
-          body: _pages.elementAt(_selectedIndex),
+
+          // ====================== 关键：把 body 改成 Column ======================
+          body: Column(
+            children: [
+              Expanded(child: _pages.elementAt(_selectedIndex)),
+
+              // ====================== 新增：推送控制面板 ======================
+              if (isAndroid)
+                Container(
+                  padding: EdgeInsets.all(12),
+                  color: Colors.grey[50],
+                  child: Column(
+                    children: [
+                      TextField(
+                        controller: _tokenController,
+                        enabled: !_isSending,
+                        decoration: InputDecoration(
+                          hintText: "目标设备推送TOKEN",
+                          border: OutlineInputBorder(),
+                          contentPadding: EdgeInsets.symmetric(horizontal: 10),
+                        ),
+                      ),
+                      SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: ElevatedButton(
+                              onPressed: _isSending ? null : () => _sendPush("解锁"),
+                              child: Text("解锁"),
+                            ),
+                          ),
+                          SizedBox(width: 10),
+                          Expanded(
+                            child: ElevatedButton(
+                              onPressed: _isSending ? null : () => _sendPush("咫尺"),
+                              child: Text("开启"),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
         ));
   }
 
@@ -156,14 +234,13 @@ class HomePageState extends State<HomePage> {
 
 class WebHomePage extends StatelessWidget {
   final connectionPage =
-      ConnectionPage(appBarActions: <Widget>[const WebSettingsPage()]);
+  ConnectionPage(appBarActions: <Widget>[const WebSettingsPage()]);
 
   @override
   Widget build(BuildContext context) {
     stateGlobal.isInMainPage = true;
     handleUnilink(context);
     return Scaffold(
-      // backgroundColor: MyTheme.grayBg,
       appBar: AppBar(
         centerTitle: true,
         title: Text("${bind.mainGetAppNameSync()} (Preview)"),
@@ -245,11 +322,11 @@ class WebHomePage extends StatelessWidget {
       }
     }
     if (id != null) {
-      connect(context, id, 
-        isFileTransfer: isFileTransfer, 
-        isViewCamera: isViewCamera, 
-        isTerminal: isTerminal,
-        password: password);
+      connect(context, id,
+          isFileTransfer: isFileTransfer,
+          isViewCamera: isViewCamera,
+          isTerminal: isTerminal,
+          password: password);
     }
   }
 }
