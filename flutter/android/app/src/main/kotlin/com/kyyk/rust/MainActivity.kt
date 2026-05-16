@@ -31,6 +31,9 @@ import kotlin.concurrent.thread
 
 // ============== 华为 HMS ==============
 import com.huawei.hms.push.HmsMessaging
+// 修复缺失的导入
+import android.app.Activity
+import android.provider.Settings
 
 class MainActivity : FlutterActivity() {
     companion object {
@@ -44,7 +47,7 @@ class MainActivity : FlutterActivity() {
         const val UNLOCK_PREFS_NAME = "rustdesk_unlock_config"
         const val PREFS_KEY_UNLOCK_PASSWORD = "screen_unlock_password"
 
-        // ========== 新增：屏幕录制权限所需常量（与 PermissionRequestTransparentActivity 和 MainService 共用）==========
+        // ========== 屏幕录制权限所需常量（唯一保留的定义处）==========
         const val ACT_REQUEST_MEDIA_PROJECTION = "ACT_REQUEST_MEDIA_PROJECTION"
         const val ACT_INIT_MEDIA_PROJECTION_AND_SERVICE = "ACT_INIT_MEDIA_PROJECTION_AND_SERVICE"
         const val EXT_MEDIA_PROJECTION_RES_INTENT = "EXT_MEDIA_PROJECTION_RES_INTENT"
@@ -52,10 +55,8 @@ class MainActivity : FlutterActivity() {
         const val RES_FAILED = Activity.RESULT_FIRST_USER
     }
 
-    // ====================== 新增：推送发送通道 ======================
+    // ====================== 推送发送通道 ======================
     private val PUSH_SENDER_CHANNEL = "com.kyyk.rust/push_sender"
-
-    // ====================== 华为 Token 通道 ======================
     private val HUAWEI_TOKEN_CHANNEL = "com.kyyk.rust/huawei_token"
 
     private val channelTag = "mChannel"
@@ -64,14 +65,10 @@ class MainActivity : FlutterActivity() {
 
     private var isAudioStart = false
     private val audioRecordHandle = AudioRecordHandle(this, { false }, { isAudioStart })
-
-    // 新增：标志是否正在等待屏幕录制权限授权
     private var isWaitingForMediaPermission = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
-        // 初始化剪贴板管理器
         if (_rdClipboardManager == null) {
             _rdClipboardManager = RdClipboardManager(getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
             FFI.setClipboardManager(_rdClipboardManager!!)
@@ -82,7 +79,6 @@ class MainActivity : FlutterActivity() {
         super.configureFlutterEngine(flutterEngine)
         TokenRefreshReceiver.flutterEngine = flutterEngine
 
-        // 保留服务绑定等其他逻辑
         if (MainService.isReady) {
             Intent(activity, MainService::class.java).also {
                 bindService(it, serviceConnection, Context.BIND_AUTO_CREATE)
@@ -95,7 +91,7 @@ class MainActivity : FlutterActivity() {
         )
         initFlutterChannel(flutterMethodChannel!!)
 
-        // ====================== 新增：推送发送方法通道 ======================
+        // 推送发送通道
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, PUSH_SENDER_CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
                 "sendPushCommand" -> {
@@ -112,7 +108,7 @@ class MainActivity : FlutterActivity() {
             }
         }
 
-        // ====================== 华为 Token 方法通道 ======================
+        // 华为 Token 通道
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, HUAWEI_TOKEN_CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
                 "getHuaweiToken" -> {
@@ -135,9 +131,7 @@ class MainActivity : FlutterActivity() {
                         result.success(false)
                     }
                 }
-                else -> {
-                    result.notImplemented()
-                }
+                else -> result.notImplemented()
             }
         }
 
@@ -163,14 +157,13 @@ class MainActivity : FlutterActivity() {
 
     private fun requestMediaProjection() {
         val intent = Intent(this, PermissionRequestTransparentActivity::class.java).apply {
-            action = ACT_REQUEST_MEDIA_PROJECTION  // 使用常量
+            action = ACT_REQUEST_MEDIA_PROJECTION
         }
         startActivityForResult(intent, REQ_INVOKE_PERMISSION_ACTIVITY_MEDIA_PROJECTION)
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        // 处理用户取消授权的情况（与源码保持一致）
         if (requestCode == REQ_INVOKE_PERMISSION_ACTIVITY_MEDIA_PROJECTION && resultCode == RES_FAILED) {
             flutterMethodChannel?.invokeMethod("on_media_projection_canceled", null)
         }
@@ -190,11 +183,9 @@ class MainActivity : FlutterActivity() {
             val binder = service as MainService.LocalBinder
             mainService = binder.getService()
 
-            // 关键修复：权限已就绪且录制未启动 → 自动开始录制
             if (MainService.isReady && !MainService.isStart) {
                 mainService?.startCapture()
             }
-            // 如果正在等待权限授权，且权限已就绪 → 自动开始录制并清除等待标志
             if (isWaitingForMediaPermission && MainService.isReady) {
                 mainService?.startCapture()
                 isWaitingForMediaPermission = false
@@ -207,17 +198,40 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    // ========== 修复缺失的函数 ==========
+    private fun startAction(context: Context, action: String) {
+        when (action) {
+            "accessibility" -> {
+                try {
+                    val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                    context.startActivity(intent)
+                } catch (e: Exception) {
+                    Log.e(logTag, "Failed to open accessibility settings", e)
+                }
+            }
+            else -> Log.w(logTag, "Unknown START_ACTION: $action")
+        }
+    }
+
+    private fun isSupportVoiceCall(): Boolean {
+        // 根据实际情况返回是否支持语音通话，这里简单返回 true
+        return true
+    }
+
+    private fun requestPermission(context: Context, permission: String) {
+        XXPermissions.with(this)
+            .permission(permission)
+            .request { _, _ -> }
+    }
+
     private fun initFlutterChannel(flutterMethodChannel: MethodChannel) {
         flutterMethodChannel.setMethodCallHandler { call, result ->
             when (call.method) {
                 "init_service" -> {
-                    // 先绑定服务
                     Intent(activity, MainService::class.java).also {
                         bindService(it, serviceConnection, Context.BIND_AUTO_CREATE)
                     }
-
                     if (MainService.isReady) {
-                        // 权限已就绪，尝试启动录制（如果 mainService 尚未绑定，onServiceConnected 中会自动启动）
                         mainService?.let {
                             if (!MainService.isStart) {
                                 it.startCapture()
@@ -226,8 +240,6 @@ class MainActivity : FlutterActivity() {
                         result.success(false)
                         return@setMethodCallHandler
                     }
-
-                    // 未授权，发起屏幕录制权限请求
                     isWaitingForMediaPermission = true
                     requestMediaProjection()
                     result.success(true)
@@ -235,18 +247,14 @@ class MainActivity : FlutterActivity() {
                 "start_capture" -> {
                     mainService?.let {
                         result.success(it.startCapture())
-                    } ?: let {
-                        result.success(false)
-                    }
+                    } ?: result.success(false)
                 }
                 "stop_service" -> {
                     Log.d(logTag, "Stop service")
                     mainService?.let {
                         it.destroy()
                         result.success(true)
-                    } ?: let {
-                        result.success(false)
-                    }
+                    } ?: result.success(false)
                 }
                 "check_permission" -> {
                     if (call.arguments is String) {
@@ -274,9 +282,7 @@ class MainActivity : FlutterActivity() {
                 "check_video_permission" -> {
                     mainService?.let {
                         result.success(it.checkMediaPermission())
-                    } ?: let {
-                        result.success(false)
-                    }
+                    } ?: result.success(false)
                 }
                 "check_service" -> {
                     Companion.flutterMethodChannel?.invokeMethod(
@@ -327,9 +333,7 @@ class MainActivity : FlutterActivity() {
                 "SET_START_ON_BOOT_OPT" -> {
                     if (call.arguments is Boolean) {
                         val prefs = getSharedPreferences("KEY_SHARED_PREFERENCES", MODE_PRIVATE)
-                        val edit = prefs.edit()
-                        edit.putBoolean("KEY_START_ON_BOOT_OPT", call.arguments as Boolean)
-                        edit.apply()
+                        prefs.edit().putBoolean("KEY_START_ON_BOOT_OPT", call.arguments).apply()
                         result.success(true)
                     } else {
                         result.success(false)
@@ -338,9 +342,7 @@ class MainActivity : FlutterActivity() {
                 "SYNC_APP_DIR_CONFIG_PATH" -> {
                     if (call.arguments is String) {
                         val prefs = getSharedPreferences("KEY_SHARED_PREFERENCES", MODE_PRIVATE)
-                        val edit = prefs.edit()
-                        edit.putString("KEY_APP_DIR_CONFIG_PATH", call.arguments as String)
-                        edit.apply()
+                        prefs.edit().putString("KEY_APP_DIR_CONFIG_PATH", call.arguments).apply()
                         result.success(true)
                     } else {
                         result.success(false)
