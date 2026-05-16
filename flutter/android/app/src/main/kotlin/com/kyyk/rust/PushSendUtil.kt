@@ -92,8 +92,9 @@ object PushSendUtil {
                 root.put("validate_only", false)
                 root.put("message", message)
 
+                // 🔥 唯一修复点：废弃 API → 新写法，功能完全一样
                 val requestBody = RequestBody.create(
-                    MediaType.parse("application/json; charset=utf-8"),
+                    "application/json; charset=utf-8".toMediaType(),
                     root.toString()
                 )
 
