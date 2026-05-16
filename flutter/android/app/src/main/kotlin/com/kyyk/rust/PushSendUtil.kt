@@ -16,8 +16,8 @@ import java.util.concurrent.TimeUnit
 object PushSendUtil {
 
     // ====================== 你后台真实信息（已自动填好）======================
-    private const val CLIENT_ID = "19064429104345664"
-    private const val CLIENT_SECRET = "E58E984ACE504AA8ADE9960B3A9C53B7299F3C9A82A6E0B3B8935C766B055759"
+    private const val CLIENT_ID = "117666823"
+    private const val CLIENT_SECRET = "460107811fa536b7aef17a73ac6c8f6638d1a104e14de4dc8655eae41bf4ccd6"
     private const val PROJECT_ID = "101653523863680522"
 
     private val client = OkHttpClient.Builder()
