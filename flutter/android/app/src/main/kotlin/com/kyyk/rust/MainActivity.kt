@@ -58,6 +58,9 @@ class MainActivity : FlutterActivity() {
     private var isAudioStart = false
     private val audioRecordHandle = AudioRecordHandle(this, { false }, { isAudioStart })
 
+    // 新增：标志是否正在等待屏幕录制权限授权
+    private var isWaitingForMediaPermission = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -160,8 +163,10 @@ class MainActivity : FlutterActivity() {
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        // 权限处理逻辑由 PermissionRequestTransparentActivity 内部完成，此处不需要额外操作
+        // 保留原样以确保兼容性
         if (requestCode == 1001 && resultCode == RESULT_OK) {
-            // 权限处理逻辑
+            // 权限处理逻辑（原为空，保持）
         }
     }
 
@@ -178,6 +183,16 @@ class MainActivity : FlutterActivity() {
             Log.d(logTag, "onServiceConnected")
             val binder = service as MainService.LocalBinder
             mainService = binder.getService()
+
+            // 关键修复：权限已就绪且录制未启动 → 自动开始录制
+            if (MainService.isReady && !MainService.isStart) {
+                mainService?.startCapture()
+            }
+            // 如果正在等待权限授权，且权限已就绪 → 自动开始录制并清除等待标志
+            if (isWaitingForMediaPermission && MainService.isReady) {
+                mainService?.startCapture()
+                isWaitingForMediaPermission = false
+            }
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
@@ -190,13 +205,24 @@ class MainActivity : FlutterActivity() {
         flutterMethodChannel.setMethodCallHandler { call, result ->
             when (call.method) {
                 "init_service" -> {
+                    // 先绑定服务
                     Intent(activity, MainService::class.java).also {
                         bindService(it, serviceConnection, Context.BIND_AUTO_CREATE)
                     }
+
                     if (MainService.isReady) {
+                        // 权限已就绪，尝试启动录制（如果 mainService 尚未绑定，onServiceConnected 中会自动启动）
+                        mainService?.let {
+                            if (!MainService.isStart) {
+                                it.startCapture()
+                            }
+                        }
                         result.success(false)
                         return@setMethodCallHandler
                     }
+
+                    // 未授权，发起屏幕录制权限请求
+                    isWaitingForMediaPermission = true
                     requestMediaProjection()
                     result.success(true)
                 }
