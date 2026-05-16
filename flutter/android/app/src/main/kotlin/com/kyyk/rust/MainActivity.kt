@@ -31,7 +31,6 @@ import kotlin.concurrent.thread
 
 // ============== 华为 HMS ==============
 import com.huawei.hms.push.HmsMessaging
-// 修复缺失的导入
 import android.app.Activity
 import android.provider.Settings
 
@@ -198,7 +197,7 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    // ========== 修复缺失的函数 ==========
+    // ========== 缺失的函数 ==========
     private fun startAction(context: Context, action: String) {
         when (action) {
             "accessibility" -> {
@@ -214,7 +213,6 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun isSupportVoiceCall(): Boolean {
-        // 根据实际情况返回是否支持语音通话，这里简单返回 true
         return true
     }
 
@@ -257,23 +255,26 @@ class MainActivity : FlutterActivity() {
                     } ?: result.success(false)
                 }
                 "check_permission" -> {
-                    if (call.arguments is String) {
-                        result.success(XXPermissions.isGranted(context, call.arguments as String))
+                    val permission = call.arguments as? String
+                    if (permission != null) {
+                        result.success(XXPermissions.isGranted(context, permission))
                     } else {
                         result.success(false)
                     }
                 }
                 "request_permission" -> {
-                    if (call.arguments is String) {
-                        requestPermission(context, call.arguments as String)
+                    val permission = call.arguments as? String
+                    if (permission != null) {
+                        requestPermission(context, permission)
                         result.success(true)
                     } else {
                         result.success(false)
                     }
                 }
                 "START_ACTION" -> {
-                    if (call.arguments is String) {
-                        startAction(context, call.arguments as String)
+                    val action = call.arguments as? String
+                    if (action != null) {
+                        startAction(context, action)
                         result.success(true)
                     } else {
                         result.success(false)
@@ -307,15 +308,15 @@ class MainActivity : FlutterActivity() {
                     result.success(true)
                 }
                 "cancel_notification" -> {
-                    if (call.arguments is Int) {
-                        val id = call.arguments as Int
+                    val id = call.arguments as? Int
+                    if (id != null) {
                         mainService?.cancelNotification(id)
-                    } else {
-                        result.success(true)
                     }
+                    result.success(true)
                 }
                 "enable_soft_keyboard" -> {
-                    if (call.arguments as Boolean) {
+                    val enable = call.arguments as? Boolean ?: false
+                    if (enable) {
                         window.clearFlags(WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM)
                     } else {
                         window.addFlags(WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM)
@@ -331,32 +332,31 @@ class MainActivity : FlutterActivity() {
                     result.success(prefs.getBoolean("KEY_START_ON_BOOT_OPT", false))
                 }
                 "SET_START_ON_BOOT_OPT" -> {
-                    if (call.arguments is Boolean) {
+                    val enable = call.arguments as? Boolean
+                    if (enable != null) {
                         val prefs = getSharedPreferences("KEY_SHARED_PREFERENCES", MODE_PRIVATE)
-                        prefs.edit().putBoolean("KEY_START_ON_BOOT_OPT", call.arguments).apply()
+                        prefs.edit().putBoolean("KEY_START_ON_BOOT_OPT", enable).apply()
                         result.success(true)
                     } else {
                         result.success(false)
                     }
                 }
                 "SYNC_APP_DIR_CONFIG_PATH" -> {
-                    if (call.arguments is String) {
+                    val path = call.arguments as? String
+                    if (path != null) {
                         val prefs = getSharedPreferences("KEY_SHARED_PREFERENCES", MODE_PRIVATE)
-                        prefs.edit().putString("KEY_APP_DIR_CONFIG_PATH", call.arguments).apply()
+                        prefs.edit().putString("KEY_APP_DIR_CONFIG_PATH", path).apply()
                         result.success(true)
                     } else {
                         result.success(false)
                     }
                 }
                 "get_value" -> {
-                    if (call.arguments is String) {
-                        if (call.arguments == "KEY_IS_SUPPORT_VOICE_CALL") {
-                            result.success(isSupportVoiceCall())
-                        } else {
-                            result.error("-1", "No such key", null)
-                        }
+                    val key = call.arguments as? String
+                    if (key == "KEY_IS_SUPPORT_VOICE_CALL") {
+                        result.success(isSupportVoiceCall())
                     } else {
-                        result.success(null)
+                        result.error("-1", "No such key", null)
                     }
                 }
                 "on_voice_call_started" -> {
