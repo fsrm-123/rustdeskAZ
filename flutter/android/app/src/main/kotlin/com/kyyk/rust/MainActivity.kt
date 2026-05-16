@@ -45,6 +45,9 @@ class MainActivity : FlutterActivity() {
         const val PREFS_KEY_UNLOCK_PASSWORD = "screen_unlock_password"
     }
 
+    // ====================== 新增：推送发送通道 ======================
+    private val PUSH_SENDER_CHANNEL = "com.kyyk.rust/push_sender"
+
     // ====================== 华为 Token 通道 ======================
     private val HUAWEI_TOKEN_CHANNEL = "com.kyyk.rust/huawei_token"
 
@@ -63,8 +66,6 @@ class MainActivity : FlutterActivity() {
             _rdClipboardManager = RdClipboardManager(getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
             FFI.setClipboardManager(_rdClipboardManager!!)
         }
-
-        // 🔥 修复：删除错误的 requestHuaweiToken() 调用
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -84,7 +85,24 @@ class MainActivity : FlutterActivity() {
         )
         initFlutterChannel(flutterMethodChannel!!)
 
-        // ====================== 修复：华为 Token 方法通道（官方正确版） ======================
+        // ====================== 新增：推送发送方法通道 ======================
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, PUSH_SENDER_CHANNEL).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "sendPushCommand" -> {
+                    val targetToken = call.argument<String>("targetToken")
+                    val command = call.argument<String>("command")
+                    if (!targetToken.isNullOrBlank() && !command.isNullOrBlank()) {
+                        PushSendUtil.sendCommand(this, targetToken, command)
+                        result.success("OK")
+                    } else {
+                        result.error("INVALID_ARGS", "参数错误", null)
+                    }
+                }
+                else -> result.notImplemented()
+            }
+        }
+
+        // ====================== 华为 Token 方法通道 ======================
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, HUAWEI_TOKEN_CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
                 "getHuaweiToken" -> {
@@ -92,7 +110,6 @@ class MainActivity : FlutterActivity() {
                 }
                 "refreshHuaweiToken" -> {
                     try {
-                        // 🔥 修复：唯一正确的刷新方式，自动触发 onNewToken
                         thread {
                             try {
                                 HmsMessaging.getInstance(this@MainActivity).isAutoInitEnabled = true
@@ -122,9 +139,6 @@ class MainActivity : FlutterActivity() {
             }
         }
     }
-
-    // 🔥 修复：删除整个错误的 requestHuaweiToken 函数
-    // private fun requestHuaweiToken() {}
 
     override fun onResume() {
         super.onResume()
