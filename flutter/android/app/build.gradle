@@ -132,9 +132,12 @@ dependencies {
     implementation "com.caverock:androidsvg-aar:1.4"
     implementation "rustls:rustls-platform-verifier:0.1.1"
 
+    // 华为推送核心依赖
     implementation 'com.huawei.agconnect:agconnect-core:1.9.1.300'
     implementation 'com.huawei.hms:push:6.11.0.300'
 
-    // 🔥 已正确添加
     implementation 'org.bouncycastle:bcprov-jdk15on:1.70'
+    
+    // 推送发送需要的网络库（OkHttp）
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
 }
