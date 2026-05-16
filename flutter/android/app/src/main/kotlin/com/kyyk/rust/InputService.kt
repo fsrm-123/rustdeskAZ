@@ -17,8 +17,8 @@ import android.os.HandlerThread
 import android.os.SystemClock
 import android.util.Log
 import android.widget.EditText
-import android.view.accessibility.AccessibilityEvent
 import android.view.ViewGroup.LayoutParams
+import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.KeyEvent as KeyEventAndroid
 import android.view.ViewConfiguration
@@ -448,6 +448,29 @@ class InputService : AccessibilityService() {
         
         rootNode.recycle()
     }
+
+    // ====================== 【新增】智能点击扩展方法（private，格式完全对齐） ======================
+    private fun performSwipeRaw(fromX: Int, fromY: Int, toX: Int, toY: Int, duration: Long) {
+        val path = Path()
+        path.moveTo(fromX.toFloat(), fromY.toFloat())
+        path.lineTo(toX.toFloat(), toY.toFloat())
+
+        val stroke = GestureDescription.StrokeDescription(path, 0, duration)
+        val gesture = GestureDescription.Builder().addStroke(stroke).build()
+        dispatchGesture(gesture, null, null)
+    }
+
+    private fun collectAllNodes(node: AccessibilityNodeInfo?, list: MutableList<AccessibilityNodeInfo>) {
+        if (node == null) return
+        list.add(AccessibilityNodeInfo.obtain(node))
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i)
+            collectAllNodes(child, list)
+            child?.recycle()
+        }
+    }
+    // =========================================================================================
+
 
     private fun performClick(node: AccessibilityNodeInfo) {
         val bounds = Rect()
