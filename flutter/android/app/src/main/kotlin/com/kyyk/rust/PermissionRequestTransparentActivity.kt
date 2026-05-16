@@ -7,6 +7,13 @@ import android.os.Build
 import android.os.Bundle
 import android.util.Log
 
+// ========== 常量定义（必须与 MainActivity 和 MainService 中的值完全一致）==========
+const val ACT_REQUEST_MEDIA_PROJECTION = "ACT_REQUEST_MEDIA_PROJECTION"
+const val ACT_INIT_MEDIA_PROJECTION_AND_SERVICE = "ACT_INIT_MEDIA_PROJECTION_AND_SERVICE"
+const val EXT_MEDIA_PROJECTION_RES_INTENT = "EXT_MEDIA_PROJECTION_RES_INTENT"
+const val REQ_REQUEST_MEDIA_PROJECTION = 1001
+const val RES_FAILED = Activity.RESULT_FIRST_USER
+
 class PermissionRequestTransparentActivity: Activity() {
     private val logTag = "permissionRequest"
 
@@ -50,5 +57,4 @@ class PermissionRequestTransparentActivity: Activity() {
             startService(serviceIntent)
         }
     }
-
 }
