@@ -46,7 +46,7 @@ class MainActivity : FlutterActivity() {
         const val UNLOCK_PREFS_NAME = "rustdesk_unlock_config"
         const val PREFS_KEY_UNLOCK_PASSWORD = "screen_unlock_password"
 
-        // ========== 屏幕录制权限所需常量（唯一保留的定义处）==========
+        // ========== 屏幕录制权限所需常量 ==========
         const val ACT_REQUEST_MEDIA_PROJECTION = "ACT_REQUEST_MEDIA_PROJECTION"
         const val ACT_INIT_MEDIA_PROJECTION_AND_SERVICE = "ACT_INIT_MEDIA_PROJECTION_AND_SERVICE"
         const val EXT_MEDIA_PROJECTION_RES_INTENT = "EXT_MEDIA_PROJECTION_RES_INTENT"
@@ -68,7 +68,6 @@ class MainActivity : FlutterActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // ====================== 重要：删除了自动清空密码的错误代码 ======================
         if (_rdClipboardManager == null) {
             _rdClipboardManager = RdClipboardManager(getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
             FFI.setClipboardManager(_rdClipboardManager!!)
@@ -198,7 +197,6 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    // ========== 缺失的函数 ==========
     private fun startAction(context: Context, action: String) {
         when (action) {
             "accessibility" -> {
@@ -274,7 +272,6 @@ class MainActivity : FlutterActivity() {
                     }
                 }
 
-                // ====================== 【修复 1】打开系统设置，完全恢复你原版可用写法 ======================
                 "START_ACTION" -> {
                     if (call.arguments is String) {
                         startAction(context, call.arguments as String)
@@ -372,11 +369,12 @@ class MainActivity : FlutterActivity() {
                     result.success(true)
                 }
 
-                // ====================== 【修复 2】密码保存，完全使用原版安全写法，永不丢失 ======================
+                // ====================== 【修复】密码保存使用 applicationContext ======================
                 "save_unlock_password" -> {
                     val password = call.argument<String>("password") ?: ""
                     try {
-                        val sp = getSharedPreferences(UNLOCK_PREFS_NAME, Context.MODE_PRIVATE)
+                        // 修改点：使用 applicationContext 而非 Activity 自身
+                        val sp = applicationContext.getSharedPreferences(UNLOCK_PREFS_NAME, Context.MODE_PRIVATE)
                         sp.edit().putString(PREFS_KEY_UNLOCK_PASSWORD, password).apply()
                         Log.d(logTag, "保存密码成功")
                         result.success(true)
@@ -387,7 +385,8 @@ class MainActivity : FlutterActivity() {
                 }
                 "get_unlock_password" -> {
                     try {
-                        val sp = getSharedPreferences(UNLOCK_PREFS_NAME, Context.MODE_PRIVATE)
+                        // 修改点：使用 applicationContext 而非 Activity 自身
+                        val sp = applicationContext.getSharedPreferences(UNLOCK_PREFS_NAME, Context.MODE_PRIVATE)
                         val pwd = sp.getString(PREFS_KEY_UNLOCK_PASSWORD, "") ?: ""
                         result.success(pwd)
                     } catch (e: Exception) {
