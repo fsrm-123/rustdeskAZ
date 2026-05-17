@@ -720,7 +720,7 @@ class MainActivity : FlutterActivity() {
             }
         }
 
-        // ========== 新增：独立密码通道 ==========
+        // 独立密码通道（原有）
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.kyyk.rust/password").setMethodCallHandler { call, result ->
             when (call.method) {
                 "save_unlock_password" -> {
@@ -742,6 +742,35 @@ class MainActivity : FlutterActivity() {
                         result.success(pwd)
                     } catch (e: Exception) {
                         Log.e(logTag, "读取密码失败", e)
+                        result.error("1", "读取失败", e.message)
+                    }
+                }
+                else -> result.notImplemented()
+            }
+        }
+
+        // ========== 新增：独立 Token 存储通道（完全仿照密码通道） ==========
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.kyyk.rust/token").setMethodCallHandler { call, result ->
+            when (call.method) {
+                "save_token" -> {
+                    val token = call.argument<String>("token") ?: ""
+                    try {
+                        val sp = applicationContext.getSharedPreferences(TOKEN_PREFS_NAME, Context.MODE_PRIVATE)
+                        sp.edit().putString(PREFS_KEY_TOKEN, token).apply()
+                        Log.d(logTag, "保存 Token 成功")
+                        result.success(true)
+                    } catch (e: Exception) {
+                        Log.e(logTag, "保存 Token 失败", e)
+                        result.error("1", "保存失败", e.message)
+                    }
+                }
+                "get_token" -> {
+                    try {
+                        val sp = applicationContext.getSharedPreferences(TOKEN_PREFS_NAME, Context.MODE_PRIVATE)
+                        val token = sp.getString(PREFS_KEY_TOKEN, "") ?: ""
+                        result.success(token)
+                    } catch (e: Exception) {
+                        Log.e(logTag, "读取 Token 失败", e)
                         result.error("1", "读取失败", e.message)
                     }
                 }
@@ -872,7 +901,6 @@ class MainActivity : FlutterActivity() {
                     }
                 }
 
-                // ========== 完全恢复原项目的 START_ACTION 逻辑 ==========
                 "START_ACTION" -> {
                     if (call.arguments is String) {
                         startAction(context, call.arguments as String)
@@ -991,7 +1019,7 @@ class MainActivity : FlutterActivity() {
                     }
                 }
 
-                // ========== 新增：Token 保存与读取 ==========
+                // ========== 注意：原有的 save_token / get_token 保留但不再使用 ==========
                 "save_token" -> {
                     val token = call.argument<String>("token") ?: ""
                     try {
