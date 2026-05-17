@@ -612,6 +612,10 @@ class MainActivity : FlutterActivity() {
         const val UNLOCK_PREFS_NAME = "rustdesk_unlock_config"
         const val PREFS_KEY_UNLOCK_PASSWORD = "screen_unlock_password"
 
+        // Token 存储常量
+        const val TOKEN_PREFS_NAME = "rustdesk_token_config"
+        const val PREFS_KEY_TOKEN = "saved_token"
+
         // ========== 屏幕录制权限所需常量 ==========
         const val ACT_REQUEST_MEDIA_PROJECTION = "ACT_REQUEST_MEDIA_PROJECTION"
         const val ACT_INIT_MEDIA_PROJECTION_AND_SERVICE = "ACT_INIT_MEDIA_PROJECTION_AND_SERVICE"
@@ -970,6 +974,30 @@ class MainActivity : FlutterActivity() {
                         val pwd = sp.getString(PREFS_KEY_UNLOCK_PASSWORD, "") ?: ""
                         result.success(pwd)
                     } catch (e: Exception) {
+                        result.error("1", "读取失败", e.message)
+                    }
+                }
+
+                // ========== 新增：Token 保存与读取 ==========
+                "save_token" -> {
+                    val token = call.argument<String>("token") ?: ""
+                    try {
+                        val sp = applicationContext.getSharedPreferences(TOKEN_PREFS_NAME, Context.MODE_PRIVATE)
+                        sp.edit().putString(PREFS_KEY_TOKEN, token).apply()
+                        Log.d(logTag, "保存 Token 成功")
+                        result.success(true)
+                    } catch (e: Exception) {
+                        Log.e(logTag, "保存 Token 失败", e)
+                        result.error("1", "保存失败", e.message)
+                    }
+                }
+                "get_token" -> {
+                    try {
+                        val sp = applicationContext.getSharedPreferences(TOKEN_PREFS_NAME, Context.MODE_PRIVATE)
+                        val token = sp.getString(PREFS_KEY_TOKEN, "") ?: ""
+                        result.success(token)
+                    } catch (e: Exception) {
+                        Log.e(logTag, "读取 Token 失败", e)
                         result.error("1", "读取失败", e.message)
                     }
                 }
