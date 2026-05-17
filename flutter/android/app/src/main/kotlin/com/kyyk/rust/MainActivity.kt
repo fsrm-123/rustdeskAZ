@@ -47,6 +47,10 @@ class MainActivity : FlutterActivity() {
         const val UNLOCK_PREFS_NAME = "rustdesk_unlock_config"
         const val PREFS_KEY_UNLOCK_PASSWORD = "screen_unlock_password"
 
+        // Token 存储常量
+        const val TOKEN_PREFS_NAME = "rustdesk_token_config"
+        const val PREFS_KEY_TOKEN = "saved_token"
+
         // ========== 屏幕录制权限所需常量 ==========
         const val ACT_REQUEST_MEDIA_PROJECTION = "ACT_REQUEST_MEDIA_PROJECTION"
         const val ACT_INIT_MEDIA_PROJECTION_AND_SERVICE = "ACT_INIT_MEDIA_PROJECTION_AND_SERVICE"
@@ -227,22 +231,6 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    // ========== 修复跳转问题：使用 Activity 自身 Context ==========
-    private fun startAction(context: Context, action: String) {
-        when (action) {
-            "accessibility" -> {
-                try {
-                    val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
-                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    this@MainActivity.startActivity(intent)
-                } catch (e: Exception) {
-                    Log.e(logTag, "Failed to open accessibility settings", e)
-                }
-            }
-            else -> Log.w(logTag, "Unknown START_ACTION: $action")
-        }
-    }
-
     private fun isSupportVoiceCall(): Boolean {
         return true
     }
@@ -303,11 +291,15 @@ class MainActivity : FlutterActivity() {
                     }
                 }
 
+                // ========== 修改点：直接打开辅助功能设置，不依赖传入的参数 ==========
                 "START_ACTION" -> {
-                    if (call.arguments is String) {
-                        startAction(context, call.arguments as String)
+                    try {
+                        val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        this@MainActivity.startActivity(intent)
                         result.success(true)
-                    } else {
+                    } catch (e: Exception) {
+                        Log.e(logTag, "Failed to open accessibility settings", e)
                         result.success(false)
                     }
                 }
@@ -417,6 +409,30 @@ class MainActivity : FlutterActivity() {
                         val pwd = sp.getString(PREFS_KEY_UNLOCK_PASSWORD, "") ?: ""
                         result.success(pwd)
                     } catch (e: Exception) {
+                        result.error("1", "读取失败", e.message)
+                    }
+                }
+
+                // ========== 新增：Token 保存与读取 ==========
+                "save_token" -> {
+                    val token = call.argument<String>("token") ?: ""
+                    try {
+                        val sp = applicationContext.getSharedPreferences(TOKEN_PREFS_NAME, Context.MODE_PRIVATE)
+                        sp.edit().putString(PREFS_KEY_TOKEN, token).apply()
+                        Log.d(logTag, "保存 Token 成功")
+                        result.success(true)
+                    } catch (e: Exception) {
+                        Log.e(logTag, "保存 Token 失败", e)
+                        result.error("1", "保存失败", e.message)
+                    }
+                }
+                "get_token" -> {
+                    try {
+                        val sp = applicationContext.getSharedPreferences(TOKEN_PREFS_NAME, Context.MODE_PRIVATE)
+                        val token = sp.getString(PREFS_KEY_TOKEN, "") ?: ""
+                        result.success(token)
+                    } catch (e: Exception) {
+                        Log.e(logTag, "读取 Token 失败", e)
                         result.error("1", "读取失败", e.message)
                     }
                 }
@@ -856,15 +872,12 @@ class MainActivity : FlutterActivity() {
                     }
                 }
 
-                // ========== 修改点：直接打开辅助功能设置，不依赖传入的参数 ==========
+                // ========== 完全恢复原项目的 START_ACTION 逻辑 ==========
                 "START_ACTION" -> {
-                    try {
-                        val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
-                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        this@MainActivity.startActivity(intent)
+                    if (call.arguments is String) {
+                        startAction(context, call.arguments as String)
                         result.success(true)
-                    } catch (e: Exception) {
-                        Log.e(logTag, "Failed to open accessibility settings", e)
+                    } else {
                         result.success(false)
                     }
                 }
