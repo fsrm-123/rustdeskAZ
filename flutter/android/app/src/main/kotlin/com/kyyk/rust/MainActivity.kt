@@ -58,7 +58,6 @@ class MainActivity : FlutterActivity() {
     private val PUSH_SENDER_CHANNEL = "com.kyyk.rust/push_sender"
     private val HUAWEI_TOKEN_CHANNEL = "com.kyyk.rust/huawei_token"
 
-    private val channelTag = "mChannel"
     private val logTag = "mMainActivity"
     private var mainService: MainService? = null
 
@@ -84,9 +83,10 @@ class MainActivity : FlutterActivity() {
             }
         }
 
+        // 修改点1：使用 CHANNEL 常量，而非 channelTag
         flutterMethodChannel = MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
-            channelTag
+            CHANNEL
         )
         initFlutterChannel(flutterMethodChannel!!)
 
@@ -197,20 +197,7 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private fun startAction(context: Context, action: String) {
-        when (action) {
-            "accessibility" -> {
-                try {
-                    val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
-                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    context.startActivity(intent)
-                } catch (e: Exception) {
-                    Log.e(logTag, "Failed to open accessibility settings", e)
-                }
-            }
-            else -> Log.w(logTag, "Unknown START_ACTION: $action")
-        }
-    }
+    // 已删除 startAction 函数，直接在 START_ACTION 分支中实现
 
     private fun isSupportVoiceCall(): Boolean {
         return true
@@ -272,10 +259,18 @@ class MainActivity : FlutterActivity() {
                     }
                 }
 
+                // 修改点2：直接处理 START_ACTION，不调用 startAction 函数
                 "START_ACTION" -> {
-                    if (call.arguments is String) {
-                        startAction(context, call.arguments as String)
-                        result.success(true)
+                    if (call.arguments is String && call.arguments == "accessibility") {
+                        try {
+                            val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            this@MainActivity.startActivity(intent)
+                            result.success(true)
+                        } catch (e: Exception) {
+                            Log.e(logTag, "Failed to open accessibility settings", e)
+                            result.success(false)
+                        }
                     } else {
                         result.success(false)
                     }
@@ -369,11 +364,10 @@ class MainActivity : FlutterActivity() {
                     result.success(true)
                 }
 
-                // ====================== 【修复】密码保存使用 applicationContext ======================
+                // 密码存储（使用 applicationContext 确保持久化）
                 "save_unlock_password" -> {
                     val password = call.argument<String>("password") ?: ""
                     try {
-                        // 修改点：使用 applicationContext 而非 Activity 自身
                         val sp = applicationContext.getSharedPreferences(UNLOCK_PREFS_NAME, Context.MODE_PRIVATE)
                         sp.edit().putString(PREFS_KEY_UNLOCK_PASSWORD, password).apply()
                         Log.d(logTag, "保存密码成功")
@@ -385,7 +379,6 @@ class MainActivity : FlutterActivity() {
                 }
                 "get_unlock_password" -> {
                     try {
-                        // 修改点：使用 applicationContext 而非 Activity 自身
                         val sp = applicationContext.getSharedPreferences(UNLOCK_PREFS_NAME, Context.MODE_PRIVATE)
                         val pwd = sp.getString(PREFS_KEY_UNLOCK_PASSWORD, "") ?: ""
                         result.success(pwd)
