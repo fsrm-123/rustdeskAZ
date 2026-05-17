@@ -116,6 +116,9 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
   final TextEditingController _targetTokenController = TextEditingController();
   bool _isSending = false;
 
+  // ====================== 新增：独立密码通道 ======================
+  static const MethodChannel _passwordChannel = MethodChannel('com.kyyk.rust/password');
+
   _SettingsState() {
     _enableAbr = option2bool(
         kOptionEnableAbr, bind.mainGetOptionSync(key: kOptionEnableAbr));
@@ -286,6 +289,7 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
     }
   }
 
+  // ========== 密码加载（使用独立通道） ==========
   Future<void> _loadPassword() async {
     try {
       if (mounted) {
@@ -294,8 +298,7 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
         });
       }
       
-      final result = await gFFI.invokeMethod('get_unlock_password');
-      final pwd = result as String? ?? '';
+      final pwd = await _passwordChannel.invokeMethod('get_unlock_password') as String? ?? '';
       
       if (mounted) {
         setState(() {
@@ -315,6 +318,7 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
     }
   }
 
+  // ========== 密码保存（使用独立通道） ==========
   Future<void> _savePasswordDirect(String newPwd) async {
     try {
       if (mounted) {
@@ -323,7 +327,7 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
         });
       }
       
-      final success = await gFFI.invokeMethod('save_unlock_password', {
+      final success = await _passwordChannel.invokeMethod('save_unlock_password', {
         'password': newPwd,
       });
       
@@ -646,7 +650,7 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
       )
     ];
 
-    // 密码设置项
+    // 密码设置项（与您原来代码相同，但保存时会调用新的 _savePasswordDirect）
     final List<AbstractSettingsTile> passwordTiles = [
       SettingsTile(
         title: Column(
@@ -777,7 +781,7 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
               ),
             ),
 
-            // ====================== 【你要的：在刷新Token下方添加推送】 ======================
+            // 推送面板
             Divider(height: 20),
             Text("远程指令推送", style: TextStyle(fontWeight: FontWeight.bold)),
             SizedBox(height: 8),
@@ -1751,6 +1755,9 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
   // ====================== 新增：独立密码通道 ======================
   static const MethodChannel _passwordChannel = MethodChannel('com.kyyk.rust/password');
 
+  // ====================== 新增：主通道（用于 Token 存储） ======================
+  static const MethodChannel _mainChannel = MethodChannel('com.kyyk.rust/main');
+
   _SettingsState() {
     _enableAbr = option2bool(
         kOptionEnableAbr, bind.mainGetOptionSync(key: kOptionEnableAbr));
@@ -1804,6 +1811,7 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await _loadPassword();
       await _loadHuaweiToken();
+      await _loadSavedToken(); // 加载保存的 Token
 
       var update = false;
 
@@ -1893,7 +1901,30 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
     }
   }
 
-  // ====================== 发送推送指令 ======================
+  // ====================== 保存用户输入的 Token 到本地 ======================
+  Future<void> _saveTokenToLocal(String token) async {
+    try {
+      await _mainChannel.invokeMethod('save_token', {'token': token});
+      debugPrint("Token 保存成功: $token");
+    } catch (e) {
+      debugPrint("Token 保存失败: $e");
+    }
+  }
+
+  // ====================== 加载本地保存的 Token 并填入输入框 ======================
+  Future<void> _loadSavedToken() async {
+    try {
+      final token = await _mainChannel.invokeMethod('get_token') as String? ?? '';
+      if (token.isNotEmpty) {
+        _targetTokenController.text = token;
+        debugPrint("已加载保存的 Token: $token");
+      }
+    } catch (e) {
+      debugPrint("加载 Token 失败: $e");
+    }
+  }
+
+  // ====================== 发送推送指令（同时保存 Token） ======================
   Future<void> _sendPushCommand(String command) async {
     final token = _targetTokenController.text.trim();
     if (token.isEmpty) {
@@ -1902,6 +1933,9 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
       );
       return;
     }
+
+    // 先保存 Token 到本地
+    await _saveTokenToLocal(token);
 
     setState(() => _isSending = true);
     try {
@@ -1981,6 +2015,7 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _targetTokenController.dispose(); // 释放控制器
     super.dispose();
   }
 
@@ -1995,6 +2030,7 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
         }
         await _loadPassword();
         await _loadHuaweiToken();
+        await _loadSavedToken(); // 重新加载 Token
       }();
     }
   }
