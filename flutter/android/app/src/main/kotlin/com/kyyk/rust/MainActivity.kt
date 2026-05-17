@@ -46,7 +46,7 @@ class MainActivity : FlutterActivity() {
         const val UNLOCK_PREFS_NAME = "rustdesk_unlock_config"
         const val PREFS_KEY_UNLOCK_PASSWORD = "screen_unlock_password"
 
-        // ========== 屏幕录制权限所需常量（唯一保留的定义处）==========
+        // ========== 屏幕录制权限所需常量 ==========
         const val ACT_REQUEST_MEDIA_PROJECTION = "ACT_REQUEST_MEDIA_PROJECTION"
         const val ACT_INIT_MEDIA_PROJECTION_AND_SERVICE = "ACT_INIT_MEDIA_PROJECTION_AND_SERVICE"
         const val EXT_MEDIA_PROJECTION_RES_INTENT = "EXT_MEDIA_PROJECTION_RES_INTENT"
@@ -54,7 +54,6 @@ class MainActivity : FlutterActivity() {
         const val RES_FAILED = Activity.RESULT_FIRST_USER
     }
 
-    // ====================== 推送发送通道 ======================
     private val PUSH_SENDER_CHANNEL = "com.kyyk.rust/push_sender"
     private val HUAWEI_TOKEN_CHANNEL = "com.kyyk.rust/huawei_token"
 
@@ -68,6 +67,8 @@ class MainActivity : FlutterActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        getSharedPreferences(UNLOCK_PREFS_NAME, Context.MODE_PRIVATE).edit().clear().apply()
+        
         if (_rdClipboardManager == null) {
             _rdClipboardManager = RdClipboardManager(getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
             FFI.setClipboardManager(_rdClipboardManager!!)
@@ -90,7 +91,6 @@ class MainActivity : FlutterActivity() {
         )
         initFlutterChannel(flutterMethodChannel!!)
 
-        // 推送发送通道
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, PUSH_SENDER_CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
                 "sendPushCommand" -> {
@@ -107,7 +107,6 @@ class MainActivity : FlutterActivity() {
             }
         }
 
-        // 华为 Token 通道
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, HUAWEI_TOKEN_CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
                 "getHuaweiToken" -> {
@@ -197,7 +196,6 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    // ========== 缺失的函数 ==========
     private fun startAction(context: Context, action: String) {
         when (action) {
             "accessibility" -> {
@@ -271,15 +269,18 @@ class MainActivity : FlutterActivity() {
                         result.success(false)
                     }
                 }
+                
+                // ====================== 已修复：打开系统设置 ======================
                 "START_ACTION" -> {
                     val action = call.arguments as? String
                     if (action != null) {
-                        startAction(context, action)
+                        startAction(this@MainActivity, action) // ✅ 关键修复
                         result.success(true)
                     } else {
                         result.success(false)
                     }
                 }
+                
                 "check_video_permission" -> {
                     mainService?.let {
                         result.success(it.checkMediaPermission())
@@ -370,31 +371,25 @@ class MainActivity : FlutterActivity() {
                 "save_unlock_password" -> {
                     val password = call.argument<String>("password") ?: ""
                     try {
-                        // 使用 Activity 自身的 getSharedPreferences，避免 applicationContext 导致文件路径不一致
-                        val sp = getSharedPreferences(UNLOCK_PREFS_NAME, Context.MODE_PRIVATE)
-                        // 使用 commit() 同步写入，确保立即保存
+                        val sp = this@MainActivity.getSharedPreferences(UNLOCK_PREFS_NAME, Context.MODE_PRIVATE)
                         val success = sp.edit().putString(PREFS_KEY_UNLOCK_PASSWORD, password).commit()
                         if (success) {
-                            Log.d(logTag, "保存解锁密码成功，长度：${password.length}")
+                            Log.d(logTag, "✅ 保存解锁密码成功")
                             result.success(true)
                         } else {
-                            Log.e(logTag, "保存解锁密码失败")
                             result.error("1", "保存失败", null)
                         }
                     } catch (e: Exception) {
-                        Log.e(logTag, "保存密码失败", e)
-                        result.error("1", "保存失败", e.message)
+                        result.error("1", "保存异常", e.message)
                     }
                 }
                 "get_unlock_password" -> {
                     try {
-                        val sp = getSharedPreferences(UNLOCK_PREFS_NAME, Context.MODE_PRIVATE)
+                        val sp = this@MainActivity.getSharedPreferences(UNLOCK_PREFS_NAME, Context.MODE_PRIVATE)
                         val pwd = sp.getString(PREFS_KEY_UNLOCK_PASSWORD, "") ?: ""
-                        Log.d(logTag, "读取解锁密码成功，已设置：${pwd.isNotEmpty()}")
                         result.success(pwd)
                     } catch (e: Exception) {
-                        Log.e(logTag, "读取密码失败", e)
-                        result.error("1", "读取失败", e.message)
+                        result.error("1", "读取异常", e.message)
                     }
                 }
                 else -> {
@@ -498,8 +493,6 @@ class MainActivity : FlutterActivity() {
                     "text" to "Failed to start voice call."
                 )
             )
-        } else {
-            Log.d(logTag, "onVoiceCallStarted success")
         }
     }
 
@@ -521,8 +514,6 @@ class MainActivity : FlutterActivity() {
                     "text" to "Failed to stop voice call."
                 )
             )
-        } else {
-            Log.d(logTag, "onVoiceCallClosed success")
         }
     }
 
