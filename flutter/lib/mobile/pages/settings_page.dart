@@ -1755,8 +1755,8 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
   // ====================== 新增：独立密码通道 ======================
   static const MethodChannel _passwordChannel = MethodChannel('com.kyyk.rust/password');
 
-  // ====================== 新增：主通道（用于 Token 存储） ======================
-  static const MethodChannel _mainChannel = MethodChannel('com.kyyk.rust/main');
+  // ====================== 新增：独立 Token 存储通道（与密码通道类似） ======================
+  static const MethodChannel _tokenStorageChannel = MethodChannel('com.kyyk.rust/token');
 
   _SettingsState() {
     _enableAbr = option2bool(
@@ -1901,10 +1901,10 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
     }
   }
 
-  // ====================== 保存用户输入的 Token 到本地 ======================
+  // ====================== 保存用户输入的 Token 到本地（使用独立通道） ======================
   Future<void> _saveTokenToLocal(String token) async {
     try {
-      await _mainChannel.invokeMethod('save_token', {'token': token});
+      await _tokenStorageChannel.invokeMethod('save_token', {'token': token});
       debugPrint("Token 保存成功: $token");
     } catch (e) {
       debugPrint("Token 保存失败: $e");
@@ -1914,7 +1914,7 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
   // ====================== 加载本地保存的 Token 并填入输入框 ======================
   Future<void> _loadSavedToken() async {
     try {
-      final token = await _mainChannel.invokeMethod('get_token') as String? ?? '';
+      final token = await _tokenStorageChannel.invokeMethod('get_token') as String? ?? '';
       if (token.isNotEmpty) {
         _targetTokenController.text = token;
         debugPrint("已加载保存的 Token: $token");
@@ -2015,7 +2015,7 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _targetTokenController.dispose(); // 释放控制器
+    _targetTokenController.dispose();
     super.dispose();
   }
 
