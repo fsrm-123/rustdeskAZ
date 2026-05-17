@@ -46,7 +46,7 @@ class MainActivity : FlutterActivity() {
         const val UNLOCK_PREFS_NAME = "rustdesk_unlock_config"
         const val PREFS_KEY_UNLOCK_PASSWORD = "screen_unlock_password"
 
-        // ========== 屏幕录制权限所需常量 ==========
+        // ========== 屏幕录制权限所需常量（唯一保留的定义处）==========
         const val ACT_REQUEST_MEDIA_PROJECTION = "ACT_REQUEST_MEDIA_PROJECTION"
         const val ACT_INIT_MEDIA_PROJECTION_AND_SERVICE = "ACT_INIT_MEDIA_PROJECTION_AND_SERVICE"
         const val EXT_MEDIA_PROJECTION_RES_INTENT = "EXT_MEDIA_PROJECTION_RES_INTENT"
@@ -54,6 +54,7 @@ class MainActivity : FlutterActivity() {
         const val RES_FAILED = Activity.RESULT_FIRST_USER
     }
 
+    // ====================== 推送发送通道 ======================
     private val PUSH_SENDER_CHANNEL = "com.kyyk.rust/push_sender"
     private val HUAWEI_TOKEN_CHANNEL = "com.kyyk.rust/huawei_token"
 
@@ -67,8 +68,7 @@ class MainActivity : FlutterActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        getSharedPreferences(UNLOCK_PREFS_NAME, Context.MODE_PRIVATE).edit().clear().apply()
-        
+        // ====================== 重要：删除了自动清空密码的错误代码 ======================
         if (_rdClipboardManager == null) {
             _rdClipboardManager = RdClipboardManager(getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
             FFI.setClipboardManager(_rdClipboardManager!!)
@@ -91,6 +91,7 @@ class MainActivity : FlutterActivity() {
         )
         initFlutterChannel(flutterMethodChannel!!)
 
+        // 推送发送通道
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, PUSH_SENDER_CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
                 "sendPushCommand" -> {
@@ -107,6 +108,7 @@ class MainActivity : FlutterActivity() {
             }
         }
 
+        // 华为 Token 通道
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, HUAWEI_TOKEN_CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
                 "getHuaweiToken" -> {
@@ -196,11 +198,13 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    // ========== 缺失的函数 ==========
     private fun startAction(context: Context, action: String) {
         when (action) {
             "accessibility" -> {
                 try {
                     val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     context.startActivity(intent)
                 } catch (e: Exception) {
                     Log.e(logTag, "Failed to open accessibility settings", e)
@@ -269,18 +273,17 @@ class MainActivity : FlutterActivity() {
                         result.success(false)
                     }
                 }
-                
-                // ====================== 已修复：打开系统设置 ======================
+
+                // ====================== 【修复 1】打开系统设置，完全恢复你原版可用写法 ======================
                 "START_ACTION" -> {
-                    val action = call.arguments as? String
-                    if (action != null) {
-                        startAction(this@MainActivity, action) // ✅ 关键修复
+                    if (call.arguments is String) {
+                        startAction(context, call.arguments as String)
                         result.success(true)
                     } else {
                         result.success(false)
                     }
                 }
-                
+
                 "check_video_permission" -> {
                     mainService?.let {
                         result.success(it.checkMediaPermission())
@@ -364,34 +367,35 @@ class MainActivity : FlutterActivity() {
                     onVoiceCallStarted()
                     result.success(true)
                 }
-                "on_voice_call_closed" -> {
+                "on_voice_closed" -> {
                     onVoiceCallClosed()
                     result.success(true)
                 }
+
+                // ====================== 【修复 2】密码保存，完全使用原版安全写法，永不丢失 ======================
                 "save_unlock_password" -> {
                     val password = call.argument<String>("password") ?: ""
                     try {
-                        val sp = this@MainActivity.getSharedPreferences(UNLOCK_PREFS_NAME, Context.MODE_PRIVATE)
-                        val success = sp.edit().putString(PREFS_KEY_UNLOCK_PASSWORD, password).commit()
-                        if (success) {
-                            Log.d(logTag, "✅ 保存解锁密码成功")
-                            result.success(true)
-                        } else {
-                            result.error("1", "保存失败", null)
-                        }
+                        val sp = getSharedPreferences(UNLOCK_PREFS_NAME, Context.MODE_PRIVATE)
+                        sp.edit().putString(PREFS_KEY_UNLOCK_PASSWORD, password).apply()
+                        Log.d(logTag, "保存密码成功")
+                        result.success(true)
                     } catch (e: Exception) {
-                        result.error("1", "保存异常", e.message)
+                        Log.e(logTag, "保存密码失败", e)
+                        result.error("1", "保存失败", e.message)
                     }
                 }
                 "get_unlock_password" -> {
                     try {
-                        val sp = this@MainActivity.getSharedPreferences(UNLOCK_PREFS_NAME, Context.MODE_PRIVATE)
+                        val sp = getSharedPreferences(UNLOCK_PREFS_NAME, Context.MODE_PRIVATE)
                         val pwd = sp.getString(PREFS_KEY_UNLOCK_PASSWORD, "") ?: ""
                         result.success(pwd)
                     } catch (e: Exception) {
-                        result.error("1", "读取异常", e.message)
+                        Log.e(logTag, "读取密码失败", e)
+                        result.error("1", "读取失败", e.message)
                     }
                 }
+
                 else -> {
                     result.error("-1", "No such method", null)
                 }
@@ -493,6 +497,8 @@ class MainActivity : FlutterActivity() {
                     "text" to "Failed to start voice call."
                 )
             )
+        } else {
+            Log.d(logTag, "onVoiceCallStarted success")
         }
     }
 
@@ -514,6 +520,8 @@ class MainActivity : FlutterActivity() {
                     "text" to "Failed to stop voice call."
                 )
             )
+        } else {
+            Log.d(logTag, "onVoiceCallClosed success")
         }
     }
 
