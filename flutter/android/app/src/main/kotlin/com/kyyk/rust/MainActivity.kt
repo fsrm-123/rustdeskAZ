@@ -981,7 +981,7 @@ class MainActivity : FlutterActivity() {
                         result.success(false)
                     }
                 }
-                "get_value" -> {
+                "GET_VALUE" -> {
                     val key = call.arguments as? String
                     if (key == "KEY_IS_SUPPORT_VOICE_CALL") {
                         result.success(isSupportVoiceCall())
