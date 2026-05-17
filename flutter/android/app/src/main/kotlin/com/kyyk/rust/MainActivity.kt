@@ -58,6 +58,7 @@ class MainActivity : FlutterActivity() {
     private val PUSH_SENDER_CHANNEL = "com.kyyk.rust/push_sender"
     private val HUAWEI_TOKEN_CHANNEL = "com.kyyk.rust/huawei_token"
 
+    private val channelTag = "mChannel"
     private val logTag = "mMainActivity"
     private var mainService: MainService? = null
 
@@ -83,10 +84,9 @@ class MainActivity : FlutterActivity() {
             }
         }
 
-        // 修改点1：使用 CHANNEL 常量，而非 channelTag
         flutterMethodChannel = MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
-            CHANNEL
+            channelTag
         )
         initFlutterChannel(flutterMethodChannel!!)
 
@@ -128,6 +128,35 @@ class MainActivity : FlutterActivity() {
                     } catch (e: Exception) {
                         Log.e("HuaweiPush", "刷新按钮：获取失败", e)
                         result.success(false)
+                    }
+                }
+                else -> result.notImplemented()
+            }
+        }
+
+        // ========== 新增：独立密码通道 ==========
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.kyyk.rust/password").setMethodCallHandler { call, result ->
+            when (call.method) {
+                "save_unlock_password" -> {
+                    val password = call.argument<String>("password") ?: ""
+                    try {
+                        val sp = applicationContext.getSharedPreferences(UNLOCK_PREFS_NAME, Context.MODE_PRIVATE)
+                        sp.edit().putString(PREFS_KEY_UNLOCK_PASSWORD, password).apply()
+                        Log.d(logTag, "保存密码成功")
+                        result.success(true)
+                    } catch (e: Exception) {
+                        Log.e(logTag, "保存密码失败", e)
+                        result.error("1", "保存失败", e.message)
+                    }
+                }
+                "get_unlock_password" -> {
+                    try {
+                        val sp = applicationContext.getSharedPreferences(UNLOCK_PREFS_NAME, Context.MODE_PRIVATE)
+                        val pwd = sp.getString(PREFS_KEY_UNLOCK_PASSWORD, "") ?: ""
+                        result.success(pwd)
+                    } catch (e: Exception) {
+                        Log.e(logTag, "读取密码失败", e)
+                        result.error("1", "读取失败", e.message)
                     }
                 }
                 else -> result.notImplemented()
@@ -197,7 +226,21 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    // 已删除 startAction 函数，直接在 START_ACTION 分支中实现
+    // ========== 修复跳转问题：使用 Activity 自身 Context ==========
+    private fun startAction(context: Context, action: String) {
+        when (action) {
+            "accessibility" -> {
+                try {
+                    val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    this@MainActivity.startActivity(intent)
+                } catch (e: Exception) {
+                    Log.e(logTag, "Failed to open accessibility settings", e)
+                }
+            }
+            else -> Log.w(logTag, "Unknown START_ACTION: $action")
+        }
+    }
 
     private fun isSupportVoiceCall(): Boolean {
         return true
@@ -259,18 +302,10 @@ class MainActivity : FlutterActivity() {
                     }
                 }
 
-                // 修改点2：直接处理 START_ACTION，不调用 startAction 函数
                 "START_ACTION" -> {
-                    if (call.arguments is String && call.arguments == "accessibility") {
-                        try {
-                            val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
-                            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            this@MainActivity.startActivity(intent)
-                            result.success(true)
-                        } catch (e: Exception) {
-                            Log.e(logTag, "Failed to open accessibility settings", e)
-                            result.success(false)
-                        }
+                    if (call.arguments is String) {
+                        startAction(context, call.arguments as String)
+                        result.success(true)
                     } else {
                         result.success(false)
                     }
@@ -364,16 +399,14 @@ class MainActivity : FlutterActivity() {
                     result.success(true)
                 }
 
-                // 密码存储（使用 applicationContext 确保持久化）
+                // 原有的密码处理方法（保留，但不使用，由独立通道处理）
                 "save_unlock_password" -> {
                     val password = call.argument<String>("password") ?: ""
                     try {
                         val sp = applicationContext.getSharedPreferences(UNLOCK_PREFS_NAME, Context.MODE_PRIVATE)
                         sp.edit().putString(PREFS_KEY_UNLOCK_PASSWORD, password).apply()
-                        Log.d(logTag, "保存密码成功")
                         result.success(true)
                     } catch (e: Exception) {
-                        Log.e(logTag, "保存密码失败", e)
                         result.error("1", "保存失败", e.message)
                     }
                 }
@@ -383,7 +416,6 @@ class MainActivity : FlutterActivity() {
                         val pwd = sp.getString(PREFS_KEY_UNLOCK_PASSWORD, "") ?: ""
                         result.success(pwd)
                     } catch (e: Exception) {
-                        Log.e(logTag, "读取密码失败", e)
                         result.error("1", "读取失败", e.message)
                     }
                 }
