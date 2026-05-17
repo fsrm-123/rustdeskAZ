@@ -370,10 +370,17 @@ class MainActivity : FlutterActivity() {
                 "save_unlock_password" -> {
                     val password = call.argument<String>("password") ?: ""
                     try {
-                        val sp = applicationContext.getSharedPreferences(UNLOCK_PREFS_NAME, Context.MODE_PRIVATE)
-                        sp.edit().putString(PREFS_KEY_UNLOCK_PASSWORD, password).apply()
-                        Log.d(logTag, "保存解锁密码成功，长度：${password.length}")
-                        result.success(true)
+                        // 修改：使用 Activity 自身的 getSharedPreferences，避免 applicationContext 导致文件路径不一致
+                        val sp = getSharedPreferences(UNLOCK_PREFS_NAME, Context.MODE_PRIVATE)
+                        // 使用 commit() 同步写入，确保立即保存
+                        val success = sp.edit().putString(PREFS_KEY_UNLOCK_PASSWORD, password).commit()
+                        if (success) {
+                            Log.d(logTag, "保存解锁密码成功，长度：${password.length}")
+                            result.success(true)
+                        } else {
+                            Log.e(logTag, "保存解锁密码失败")
+                            result.error("1", "保存失败", null)
+                        }
                     } catch (e: Exception) {
                         Log.e(logTag, "保存密码失败", e)
                         result.error("1", "保存失败", e.message)
@@ -381,7 +388,8 @@ class MainActivity : FlutterActivity() {
                 }
                 "get_unlock_password" -> {
                     try {
-                        val sp = applicationContext.getSharedPreferences(UNLOCK_PREFS_NAME, Context.MODE_PRIVATE)
+                        // 修改：同样使用 getSharedPreferences 保持一致
+                        val sp = getSharedPreferences(UNLOCK_PREFS_NAME, Context.MODE_PRIVATE)
                         val pwd = sp.getString(PREFS_KEY_UNLOCK_PASSWORD, "") ?: ""
                         Log.d(logTag, "读取解锁密码成功，已设置：${pwd.isNotEmpty()}")
                         result.success(pwd)
@@ -465,70 +473,4 @@ class MainActivity : FlutterActivity() {
                 codecArray.put(codecObject)
             }
         }
-        val result = JSONObject()
-        result.put("version", Build.VERSION.SDK_INT)
-        result.put("w", w)
-        result.put("h", h)
-        result.put("codecs", codecArray)
-        FFI.setCodecInfo(result.toString())
-    }
-
-    private fun onVoiceCallStarted() {
-        var ok = false
-        mainService?.let {
-            ok = it.onVoiceCallStarted()
-        } ?: let {
-            isAudioStart = true
-            ok = audioRecordHandle.onVoiceCallStarted(null)
-        }
-        if (!ok) {
-            Log.e(logTag, "onVoiceCallStarted fail")
-            flutterMethodChannel?.invokeMethod(
-                "msgbox",
-                mapOf(
-                    "type" to "custom-nook-nocancel-hasclose-error",
-                    "title" to "Voice call",
-                    "text" to "Failed to start voice call."
-                )
-            )
-        } else {
-            Log.d(logTag, "onVoiceCallStarted success")
-        }
-    }
-
-    private fun onVoiceCallClosed() {
-        var ok = false
-        mainService?.let {
-            ok = it.onVoiceCallClosed()
-        } ?: let {
-            isAudioStart = false
-            ok = audioRecordHandle.onVoiceCallClosed(null)
-        }
-        if (!ok) {
-            Log.e(logTag, "onVoiceCallClosed fail")
-            flutterMethodChannel?.invokeMethod(
-                "msgbox",
-                mapOf(
-                    "type" to "custom-nook-nocancel-hasclose-error",
-                    "title" to "Voice call",
-                    "text" to "Failed to stop voice call."
-                )
-            )
-        } else {
-            Log.d(logTag, "onVoiceCallClosed success")
-        }
-    }
-
-    override fun onStop() {
-        super.onStop()
-        val disableFloatingWindow = FFI.getLocalOption("disable-floating-window") == "Y"
-        if (!disableFloatingWindow && MainService.isReady) {
-            startService(Intent(this, FloatingWindowService::class.java))
-        }
-    }
-
-    override fun onStart() {
-        super.onStart()
-        stopService(Intent(this, FloatingWindowService::class.java))
-    }
-}
+      
