@@ -901,11 +901,17 @@ class MainActivity : FlutterActivity() {
                     }
                 }
 
+                // ========== 修复：正确的 START_ACTION 分支，并添加详细日志 ==========
                 "START_ACTION" -> {
-                    if (call.arguments is String) {
-                        startAction(context, call.arguments as String)
+                    Log.d(logTag, "START_ACTION called, arguments=${call.arguments}")
+                    try {
+                        val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        this@MainActivity.startActivity(intent)
+                        Log.d(logTag, "START_ACTION succeeded, started accessibility settings")
                         result.success(true)
-                    } else {
+                    } catch (e: Exception) {
+                        Log.e(logTag, "START_ACTION failed", e)
                         result.success(false)
                     }
                 }
@@ -981,7 +987,7 @@ class MainActivity : FlutterActivity() {
                         result.success(false)
                     }
                 }
-                "GET_VALUE" -> {
+                "get_value" -> {
                     val key = call.arguments as? String
                     if (key == "KEY_IS_SUPPORT_VOICE_CALL") {
                         result.success(isSupportVoiceCall())
