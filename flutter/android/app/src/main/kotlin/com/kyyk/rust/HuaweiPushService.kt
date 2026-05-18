@@ -1,3 +1,4 @@
+/*
 package com.kyyk.rust
 
 import android.content.Intent
@@ -180,6 +181,74 @@ class HuaweiPushService : HmsMessageService() {
         } finally {
             nodeList.forEach { it.recycle() }
             rootNode.recycle()
+        }
+    }
+}
+*/
+package com.kyyk.rust
+
+import android.content.Intent
+import android.os.Handler
+import android.os.Looper
+import android.util.Log
+import com.huawei.hms.push.HmsMessageService
+import com.huawei.hms.push.RemoteMessage
+
+class HuaweiPushService : HmsMessageService() {
+    companion object {
+        private const val TAG = "HuaweiPush"
+        const val ACTION_PUSH_CMD = "com.kyyk.rust.PUSH_CMD"
+        
+        @JvmStatic
+        var currentToken: String = ""
+            private set
+    }
+
+    override fun onNewToken(token: String) {
+        super.onNewToken(token)
+        currentToken = token
+        Log.i(TAG, "华为Token: $token")
+        val intent = Intent("com.kyyk.rust.UPDATE_TOKEN")
+        intent.putExtra("token", token)
+        sendBroadcast(intent)
+    }
+
+    override fun onMessageReceived(message: RemoteMessage) {
+        super.onMessageReceived(message)
+        val content = message.dataOfMap["content"] ?: message.data ?: return
+        Log.i(TAG, "收到推送指令内容：$content")
+
+        // 保留原有发送广播逻辑不变
+        val cmdIntent = Intent(ACTION_PUSH_CMD)
+        cmdIntent.putExtra("content", content)
+        sendBroadcast(cmdIntent)
+
+        // 核心业务逻辑
+        val inputService = InputService.ctx ?: run {
+            Log.e(TAG, "无障碍服务未开启，无法执行操作")
+            return
+        }
+
+        // 分支1：指令为解锁
+        if (content == "解锁") {
+            if (inputService.checkScreenLocked()) {
+                inputService.tryUnlockScreen()
+                Log.i(TAG, "屏幕已锁定，执行自动解锁")
+            } else {
+                Log.i(TAG, "屏幕已解锁，无需执行解锁操作")
+            }
+            return
+        }
+
+        // 分支2：其他所有指令，通过 InputService 的命令处理器执行（支持序列命令、延迟、滑动等）
+        if (inputService.checkScreenLocked()) {
+            // 屏幕锁定，先解锁，延迟等待解锁完成后再执行命令
+            inputService.tryUnlockScreen()
+            Handler(Looper.getMainLooper()).postDelayed({
+                inputService.executeCommand(content)
+            }, 3500)
+        } else {
+            inputService.executeCommand(content)
         }
     }
 }
