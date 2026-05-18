@@ -902,7 +902,8 @@ class MainActivity : FlutterActivity() {
                 }
 
                 // ========== 修复：正确的 START_ACTION 分支，并添加详细日志 ==========
-                "START_ACTION" -> {
+               // "START_ACTION" -> {
+                "start_action" -> {    
                     Log.d(logTag, "START_ACTION called, arguments=${call.arguments}")
                     try {
                         val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
@@ -987,8 +988,8 @@ class MainActivity : FlutterActivity() {
                         result.success(false)
                     }
                 }
-              //  "get_value" -> {
-                "GET_VALUE" -> {   
+                "get_value" -> {
+               // "GET_VALUE" -> {  大写导致底部工具栏全屏显示 
                     val key = call.arguments as? String
                     if (key == "KEY_IS_SUPPORT_VOICE_CALL") {
                         result.success(isSupportVoiceCall())
