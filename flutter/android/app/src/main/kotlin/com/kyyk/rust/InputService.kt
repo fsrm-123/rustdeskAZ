@@ -1,3 +1,4 @@
+/*
 package com.kyyk.rust
 
 /**
@@ -471,6 +472,1339 @@ class InputService : AccessibilityService() {
     }
     // =========================================================================================
 
+
+    private fun performClick(node: AccessibilityNodeInfo) {
+        val bounds = Rect()
+        node.getBoundsInScreen(bounds)
+        performClickRaw(bounds.centerX(), bounds.centerY(), 100)
+    }
+
+    private fun performClickRaw(x: Int, y: Int, duration: Long = 100) {
+        val safeX = max(0, x).coerceAtMost(resources.displayMetrics.widthPixels - 1)
+        val safeY = max(0, y).coerceAtMost(resources.displayMetrics.heightPixels - 1)
+        
+        val path = Path().apply {
+            moveTo(safeX.toFloat(), safeY.toFloat())
+        }
+        
+        val gesture = GestureDescription.Builder()
+            .addStroke(GestureDescription.StrokeDescription(path, 0, duration))
+            .build()
+        
+        dispatchGesture(gesture, null, null)
+    }
+
+    // 远程输入处理（点击事件触发解锁）
+    @RequiresApi(Build.VERSION_CODES.N)
+    fun onMouseInput(mask: Int, _x: Int, _y: Int) {
+        // 只有点击事件（LEFT_DOWN）触发解锁检查
+        if (mask == LEFT_DOWN) {
+            // 如果屏幕锁定，尝试解锁
+            if (checkScreenLocked()) {
+                tryUnlockScreen()
+                // 无论解锁是否成功，都继续处理点击（让用户知道设备状态）
+            }
+        }
+
+        val x = max(0, _x)
+        val y = max(0, _y)
+
+        if (mask == 0 || mask == LEFT_MOVE) {
+            val oldX = mouseX
+            val oldY = mouseY
+            mouseX = (x * COMMON_SCREEN_INFO.scale).toInt()
+            mouseY = (y * COMMON_SCREEN_INFO.scale).toInt()
+            if (isWaitingLongPress) {
+                val delta = abs(oldX - mouseX) + abs(oldY - mouseY)
+                if (delta > 8) {
+                    isWaitingLongPress = false
+                }
+            }
+        }
+
+        if (mask == LEFT_DOWN) {
+            isWaitingLongPress = true
+            timer.schedule(object : TimerTask() {
+                override fun run() {
+                    if (isWaitingLongPress) {
+                        isWaitingLongPress = false
+                        continueGesture(mouseX, mouseY)
+                    }
+                }
+            }, longPressDuration)
+
+            leftIsDown = true
+            startGesture(mouseX, mouseY)
+            return
+        }
+
+        if (leftIsDown) {
+            continueGesture(mouseX, mouseY)
+        }
+
+        if (mask == LEFT_UP) {
+            if (leftIsDown) {
+                leftIsDown = false
+                isWaitingLongPress = false
+                endGesture(mouseX, mouseY)
+                return
+            }
+        }
+
+        if (mask == RIGHT_UP) {
+            longPressRaw(mouseX, mouseY)
+            return
+        }
+
+        if (mask == BACK_UP) {
+            performGlobalAction(GLOBAL_ACTION_BACK)
+            return
+        }
+
+        if (mask == WHEEL_BUTTON_DOWN) {
+            timer.purge()
+            recentActionTask = object : TimerTask() {
+                override fun run() {
+                    performGlobalAction(GLOBAL_ACTION_RECENTS)
+                    recentActionTask = null
+                }
+            }
+            timer.schedule(recentActionTask, LONG_TAP_DELAY)
+        }
+
+        if (mask == WHEEL_BUTTON_UP) {
+            if (recentActionTask != null) {
+                recentActionTask!!.cancel()
+                performGlobalAction(GLOBAL_ACTION_HOME)
+            }
+            return
+        }
+
+        if (mask == WHEEL_DOWN) {
+            if (mouseY < WHEEL_STEP) {
+                return
+            }
+            val path = Path()
+            path.moveTo(mouseX.toFloat(), mouseY.toFloat())
+            path.lineTo(mouseX.toFloat(), (mouseY - WHEEL_STEP).toFloat())
+            val stroke = GestureDescription.StrokeDescription(
+                path,
+                0,
+                WHEEL_DURATION
+            )
+            val builder = GestureDescription.Builder()
+            builder.addStroke(stroke)
+            wheelActionsQueue.offer(builder.build())
+            consumeWheelActions()
+        }
+
+        if (mask == WHEEL_UP) {
+            if (mouseY < WHEEL_STEP) {
+                return
+            }
+            val path = Path()
+            path.moveTo(mouseX.toFloat(), mouseY.toFloat())
+            path.lineTo(mouseX.toFloat(), (mouseY + WHEEL_STEP).toFloat())
+            val stroke = GestureDescription.StrokeDescription(
+                path,
+                0,
+                WHEEL_DURATION
+            )
+            val builder = GestureDescription.Builder()
+            builder.addStroke(stroke)
+            wheelActionsQueue.offer(builder.build())
+            consumeWheelActions()
+        }
+    }
+
+    @RequiresApi(Build.VERSION_CODES.N)
+    fun onTouchInput(mask: Int, _x: Int, _y: Int) {
+        // 触摸事件不触发解锁，避免误触
+        when (mask) {
+            TOUCH_PAN_UPDATE -> {
+                mouseX -= (_x * COMMON_SCREEN_INFO.scale).toInt()
+                mouseY -= (_y * COMMON_SCREEN_INFO.scale).toInt()
+                mouseX = max(0, mouseX)
+                mouseY = max(0, mouseY)
+                continueGesture(mouseX, mouseY)
+            }
+            TOUCH_PAN_START -> {
+                mouseX = (max(0, _x) * COMMON_SCREEN_INFO.scale).toInt()
+                mouseY = (max(0, _y) * COMMON_SCREEN_INFO.scale).toInt()
+                startGesture(mouseX, mouseY)
+            }
+            TOUCH_PAN_END -> {
+                endGesture(mouseX, mouseY)
+                mouseX = (max(0, _x) * COMMON_SCREEN_INFO.scale).toInt()
+                mouseY = (max(0, _y) * COMMON_SCREEN_INFO.scale).toInt()
+            }
+            else -> {}
+        }
+    }
+
+    @RequiresApi(Build.VERSION_CODES.N)
+    fun onKeyEvent(data: ByteArray) {
+        // 键盘事件不触发解锁
+        val keyEvent = KeyEvent.parseFrom(data)
+        val keyboardMode = keyEvent.getMode()
+
+        var textToCommit: String? = null
+
+        if (keyEvent.hasSeq()) {
+            textToCommit = keyEvent.getSeq()
+        } else if (keyboardMode == KeyboardMode.Legacy) {
+            if (keyEvent.hasChr() && (keyEvent.getDown() || keyEvent.getPress())) {
+                val chr = keyEvent.getChr()
+                if (chr != null) {
+                    textToCommit = String(Character.toChars(chr))
+                }
+            }
+        }
+
+        Log.d(logTag, "onKeyEvent $keyEvent textToCommit:$textToCommit")
+
+        var ke: KeyEventAndroid? = null
+        if (Build.VERSION.SDK_INT < 33 || textToCommit == null) {
+            ke = KeyEventConverter.toAndroidKeyEvent(keyEvent)
+        }
+        ke?.let { event ->
+            if (tryHandleVolumeKeyEvent(event)) {
+                return
+            } else if (tryHandlePowerKeyEvent(event)) {
+                return
+            }
+        }
+
+        if (Build.VERSION.SDK_INT >= 33) {
+            getInputMethod()?.let { inputMethod ->
+                inputMethod.getCurrentInputConnection()?.let { inputConnection ->
+                    if (textToCommit != null) {
+                        inputConnection.commitText(textToCommit, 1, null)
+                    } else {
+                        ke?.let { event ->
+                            inputConnection.sendKeyEvent(event)
+                            if (keyEvent.getPress()) {
+                                val actionUpEvent = KeyEventAndroid(KeyEventAndroid.ACTION_UP, event.keyCode)
+                                inputConnection.sendKeyEvent(actionUpEvent)
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            val handler = Handler(Looper.getMainLooper())
+            handler.post {
+                ke?.let { event ->
+                    val possibleNodes = possibleAccessibiltyNodes()
+                    for (item in possibleNodes) {
+                        val success = trySendKeyEvent(event, item, textToCommit)
+                        if (success) {
+                            if (keyEvent.getPress()) {
+                                val actionUpEvent = KeyEventAndroid(KeyEventAndroid.ACTION_UP, event.keyCode)
+                                trySendKeyEvent(actionUpEvent, item, textToCommit)
+                            }
+                            break
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @RequiresApi(Build.VERSION_CODES.N)
+    private fun consumeWheelActions() {
+        if (isWheelActionsPolling) {
+            return
+        } else {
+            isWheelActionsPolling = true
+        }
+        wheelActionsQueue.poll()?.let {
+            dispatchGesture(it, null, null)
+            timer.purge()
+            timer.schedule(object : TimerTask() {
+                override fun run() {
+                    isWheelActionsPolling = false
+                    consumeWheelActions()
+                }
+            }, WHEEL_DURATION + 10)
+        } ?: let {
+            isWheelActionsPolling = false
+            return
+        }
+    }
+
+    private fun longPressRaw(x: Int, y: Int) {
+        performClickRaw(x, y, longPressDuration)
+    }
+
+    private fun startGesture(x: Int, y: Int) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            touchPath.reset()
+        } else {
+            touchPath = Path()
+        }
+        touchPath.moveTo(x.toFloat(), y.toFloat())
+        lastTouchGestureStartTime = System.currentTimeMillis()
+        lastX = x
+        lastY = y
+    }
+
+    @RequiresApi(Build.VERSION_CODES.N)
+    private fun doDispatchGesture(x: Int, y: Int, willContinue: Boolean) {
+        touchPath.lineTo(x.toFloat(), y.toFloat())
+        var duration = System.currentTimeMillis() - lastTouchGestureStartTime
+        if (duration <= 0) {
+            duration = 1
+        }
+        try {
+            if (stroke == null) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    stroke = GestureDescription.StrokeDescription(
+                        touchPath,
+                        0,
+                        duration,
+                        willContinue
+                    )
+                } else {
+                    stroke = GestureDescription.StrokeDescription(
+                        touchPath,
+                        0,
+                        duration
+                    )
+                }
+            } else {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    stroke = stroke?.continueStroke(touchPath, 0, duration, willContinue)
+                } else {
+                    stroke = null
+                    stroke = GestureDescription.StrokeDescription(
+                        touchPath,
+                        0,
+                        duration
+                    )
+                }
+            }
+            stroke?.let {
+                val builder = GestureDescription.Builder()
+                builder.addStroke(it)
+                Log.d(logTag, "doDispatchGesture x:$x y:$y time:$duration")
+                dispatchGesture(builder.build(), null, null)
+            }
+        } catch (e: Exception) {
+            Log.e(logTag, "doDispatchGesture error: $e")
+        }
+    }
+
+    @RequiresApi(Build.VERSION_CODES.N)
+    private fun continueGesture(x: Int, y: Int) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            doDispatchGesture(x, y, true)
+            touchPath.reset()
+            touchPath.moveTo(x.toFloat(), y.toFloat())
+            lastTouchGestureStartTime = System.currentTimeMillis()
+            lastX = x
+            lastY = y
+        } else {
+            touchPath.lineTo(x.toFloat(), y.toFloat())
+        }
+    }
+
+    @RequiresApi(Build.VERSION_CODES.N)
+    private fun endGestureBelowO(x: Int, y: Int) {
+        try {
+            touchPath.lineTo(x.toFloat(), y.toFloat())
+            var duration = System.currentTimeMillis() - lastTouchGestureStartTime
+            if (duration <= 0) {
+                duration = 1
+            }
+            val stroke = GestureDescription.StrokeDescription(
+                touchPath,
+                0,
+                duration
+            )
+            val builder = GestureDescription.Builder()
+            builder.addStroke(stroke)
+            Log.d(logTag, "end gesture x:$x y:$y time:$duration")
+            dispatchGesture(builder.build(), null, null)
+        } catch (e: Exception) {
+            Log.e(logTag, "endGesture error: $e")
+        }
+    }
+
+    @RequiresApi(Build.VERSION_CODES.N)
+    private fun endGesture(x: Int, y: Int) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            doDispatchGesture(x, y, false)
+            touchPath.reset()
+            stroke = null
+        } else {
+            endGestureBelowO(x, y)
+        }
+    }
+
+    private fun tryHandleVolumeKeyEvent(event: KeyEventAndroid): Boolean {
+        when (event.keyCode) {
+            KeyEventAndroid.KEYCODE_VOLUME_UP -> {
+                if (event.action == KeyEventAndroid.ACTION_DOWN) {
+                    volumeController.raiseVolume(null, true, AudioManager.STREAM_SYSTEM)
+                }
+                return true
+            }
+            KeyEventAndroid.KEYCODE_VOLUME_DOWN -> {
+                if (event.action == KeyEventAndroid.ACTION_DOWN) {
+                    volumeController.lowerVolume(null, true, AudioManager.STREAM_SYSTEM)
+                }
+                return true
+            }
+            KeyEventAndroid.KEYCODE_VOLUME_MUTE -> {
+                if (event.action == KeyEventAndroid.ACTION_DOWN) {
+                    volumeController.toggleMute(true, AudioManager.STREAM_SYSTEM)
+                }
+                return true
+            }
+            else -> {
+                return false
+            }
+        }
+    }
+
+    private fun tryHandlePowerKeyEvent(event: KeyEventAndroid): Boolean {
+        if (event.keyCode == KeyEventAndroid.KEYCODE_POWER) {
+            if (event.action == KeyEventAndroid.ACTION_UP) {
+                performGlobalAction(GLOBAL_ACTION_POWER_DIALOG)
+            }
+            return true
+        }
+        return false
+    }
+
+    private fun insertAccessibilityNode(list: LinkedList<AccessibilityNodeInfo>, node: AccessibilityNodeInfo) {
+        if (list.contains(node)) {
+            return
+        }
+        list.add(node)
+    }
+
+    private fun findChildNode(node: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
+        if (node == null) {
+            return null
+        }
+        if (node.isEditable && node.isFocusable) {
+            return node
+        }
+        val childCount = node.childCount
+        for (i in 0 until childCount) {
+            val child = node.getChild(i)
+            if (child != null) {
+                if (child.isEditable && child.isFocusable) {
+                    return child
+                }
+                if (Build.VERSION.SDK_INT < 33) {
+                    child.recycle()
+                }
+            }
+        }
+        for (i in 0 until childCount) {
+            val child = node.getChild(i)
+            if (child != null) {
+                val result = findChildNode(child)
+                if (Build.VERSION.SDK_INT < 33) {
+                    if (child != result) {
+                        child.recycle()
+                    }
+                }
+                if (result != null) {
+                    return result
+                }
+            }
+        }
+        return null
+    }
+
+    private fun possibleAccessibiltyNodes(): LinkedList<AccessibilityNodeInfo> {
+        val linkedList = LinkedList<AccessibilityNodeInfo>()
+        val latestList = LinkedList<AccessibilityNodeInfo>()
+
+        val focusInput = findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+        val focusAccessibilityInput = findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+
+        val rootInActiveWindow = rootInActiveWindow
+
+        if (focusInput != null) {
+            if (focusInput.isFocusable && focusInput.isEditable) {
+                insertAccessibilityNode(linkedList, focusInput)
+            } else {
+                insertAccessibilityNode(latestList, focusInput)
+            }
+        }
+
+        if (focusAccessibilityInput != null) {
+            if (focusAccessibilityInput.isFocusable && focusAccessibilityInput.isEditable) {
+                insertAccessibilityNode(linkedList, focusAccessibilityInput)
+            } else {
+                insertAccessibilityNode(latestList, focusAccessibilityInput)
+            }
+        }
+
+        val childFromFocusInput = findChildNode(focusInput)
+        if (childFromFocusInput != null) {
+            insertAccessibilityNode(linkedList, childFromFocusInput)
+        }
+
+        val childFromFocusAccessibilityInput = findChildNode(focusAccessibilityInput)
+        if (childFromFocusAccessibilityInput != null) {
+            insertAccessibilityNode(linkedList, childFromFocusAccessibilityInput)
+        }
+
+        if (rootInActiveWindow != null) {
+            insertAccessibilityNode(linkedList, rootInActiveWindow)
+        }
+
+        for (item in latestList) {
+            insertAccessibilityNode(linkedList, item)
+        }
+
+        return linkedList
+    }
+
+    private fun trySendKeyEvent(event: KeyEventAndroid, node: AccessibilityNodeInfo, textToCommit: String?): Boolean {
+        node.refresh()
+        this.fakeEditTextForTextStateCalculation?.setSelection(0,0)
+        this.fakeEditTextForTextStateCalculation?.setText(null)
+
+        val text = node.text
+        var isShowingHint = false
+        if (Build.VERSION.SDK_INT >= 26) {
+            isShowingHint = node.isShowingHintText
+        }
+
+        var textSelectionStart = node.textSelectionStart
+        var textSelectionEnd = node.textSelectionEnd
+
+        if (text != null) {
+            if (textSelectionStart > text.length) {
+                textSelectionStart = text.length
+            }
+            if (textSelectionEnd > text.length) {
+                textSelectionEnd = text.length
+            }
+            if (textSelectionStart > textSelectionEnd) {
+                textSelectionStart = textSelectionEnd
+            }
+        }
+
+        var success = false
+
+        if (textToCommit != null) {
+            if ((textSelectionStart == -1) || (textSelectionEnd == -1)) {
+                val newText = textToCommit
+                this.fakeEditTextForTextStateCalculation?.setText(newText)
+                success = updateTextForAccessibilityNode(node)
+            } else if (text != null) {
+                this.fakeEditTextForTextStateCalculation?.setText(text)
+                this.fakeEditTextForTextStateCalculation?.setSelection(
+                    textSelectionStart,
+                    textSelectionEnd
+                )
+                this.fakeEditTextForTextStateCalculation?.text?.insert(textSelectionStart, textToCommit)
+                success = updateTextAndSelectionForAccessibiltyNode(node)
+            }
+        } else {
+            if (isShowingHint) {
+                this.fakeEditTextForTextStateCalculation?.setText(null)
+            } else {
+                this.fakeEditTextForTextStateCalculation?.setText(text)
+            }
+            if (textSelectionStart != -1 && textSelectionEnd != -1) {
+                this.fakeEditTextForTextStateCalculation?.setSelection(
+                    textSelectionStart,
+                    textSelectionEnd
+                )
+            }
+
+            this.fakeEditTextForTextStateCalculation?.let {
+                val rect = Rect()
+                node.getBoundsInScreen(rect)
+
+                it.layout(rect.left, rect.top, rect.right, rect.bottom)
+                it.onPreDraw()
+                if (event.action == KeyEventAndroid.ACTION_DOWN) {
+                    it.onKeyDown(event.keyCode, event)
+                } else if (event.action == KeyEventAndroid.ACTION_UP) {
+                    it.onKeyUp(event.keyCode, event)
+                }
+            }
+
+            success = updateTextAndSelectionForAccessibiltyNode(node)
+        }
+        return success
+    }
+
+    fun updateTextForAccessibilityNode(node: AccessibilityNodeInfo): Boolean {
+        var success = false
+        this.fakeEditTextForTextStateCalculation?.text?.let {
+            val arguments = Bundle()
+            arguments.putCharSequence(
+                AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
+                it.toString()
+            )
+            success = node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments)
+        }
+        return success
+    }
+
+    fun updateTextAndSelectionForAccessibiltyNode(node: AccessibilityNodeInfo): Boolean {
+        var success = updateTextForAccessibilityNode(node)
+
+        if (success) {
+            val selectionStart = this.fakeEditTextForTextStateCalculation?.selectionStart
+            val selectionEnd = this.fakeEditTextForTextStateCalculation?.selectionEnd
+
+            if (selectionStart != null && selectionEnd != null) {
+                val arguments = Bundle()
+                arguments.putInt(
+                    AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT,
+                    selectionStart
+                )
+                arguments.putInt(
+                    AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT,
+                    selectionEnd
+                )
+                success = node.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, arguments)
+                Log.d(logTag, "Update selection to $selectionStart $selectionEnd success:$success")
+            }
+        }
+
+        return success
+    }
+
+    override fun onAccessibilityEvent(event: AccessibilityEvent) {
+    }
+
+    override fun onServiceConnected() {
+        super.onServiceConnected()
+        ctx = this
+        
+        backgroundThread = HandlerThread("InputServiceBackground")
+        backgroundThread.start()
+        backgroundHandler = Handler(backgroundThread.looper)
+        
+        val info = AccessibilityServiceInfo()
+        if (Build.VERSION.SDK_INT >= 33) {
+            info.flags = FLAG_INPUT_METHOD_EDITOR
+        } else {
+            info.flags = 0
+        }
+        info.eventTypes = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
+        info.feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC
+        setServiceInfo(info)
+        
+        fakeEditTextForTextStateCalculation = EditText(this)
+        fakeEditTextForTextStateCalculation?.layoutParams = LayoutParams(100, 100)
+        fakeEditTextForTextStateCalculation?.onPreDraw()
+        Log.d(logTag, "onServiceConnected!")
+    }
+
+    override fun onDestroy() {
+        ctx = null
+        backgroundThread.quitSafely()
+        super.onDestroy()
+    }
+
+    override fun onInterrupt() {}
+}
+*/
+package com.kyyk.rust
+
+/**
+ * Handle remote input and dispatch android gesture
+ *
+ * Inspired by [droidVNC-NG] https://github.com/bk138/droidVNC-NG
+ */
+
+import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.GestureDescription
+import android.graphics.Path
+import android.os.Build
+import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.os.HandlerThread
+import android.os.SystemClock
+import android.util.Log
+import android.widget.EditText
+import android.view.ViewGroup.LayoutParams
+import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityNodeInfo
+import android.view.KeyEvent as KeyEventAndroid
+import android.view.ViewConfiguration
+import android.graphics.Rect
+import android.media.AudioManager
+import android.accessibilityservice.AccessibilityServiceInfo
+import android.accessibilityservice.AccessibilityServiceInfo.FLAG_INPUT_METHOD_EDITOR
+import android.view.inputmethod.EditorInfo
+import androidx.annotation.RequiresApi
+import android.app.KeyguardManager
+import android.content.Context
+import android.os.PowerManager
+import android.annotation.SuppressLint
+import java.util.*
+import java.lang.Character
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.regex.Pattern
+import kotlin.math.abs
+import kotlin.math.max
+import hbb.MessageOuterClass.KeyEvent
+import hbb.MessageOuterClass.KeyboardMode
+import hbb.KeyEventConverter
+
+const val LEFT_DOWN = 9
+const val LEFT_MOVE = 8
+const val LEFT_UP = 10
+const val RIGHT_UP = 18
+const val BACK_UP = 66
+const val WHEEL_BUTTON_DOWN = 33
+const val WHEEL_BUTTON_UP = 34
+const val WHEEL_DOWN = 523331
+const val WHEEL_UP = 963
+
+const val TOUCH_SCALE_START = 1
+const val TOUCH_SCALE = 2
+const val TOUCH_SCALE_END = 3
+const val TOUCH_PAN_START = 4
+const val TOUCH_PAN_UPDATE = 5
+const val TOUCH_PAN_END = 6
+
+const val WHEEL_STEP = 120
+const val WHEEL_DURATION = 50L
+const val LONG_TAP_DELAY = 200L
+
+// ======================== 修改：参考 Java 代码的解锁时序 ========================
+// Java 代码参数：亮屏后 1000ms 上滑，上滑后 2000ms 输密码，密码间隔 150ms
+const val WAKEUP_DELAY_MS = 1000L        // 亮屏后等待时间（原 300L）
+const val SWIPE_UP_DELAY_MS = 2000L      // 上滑后等待密码界面时间（原 500L）
+const val DIGIT_INPUT_INTERVAL_MS = 150L // 密码数字输入间隔（原 120L）
+const val UNLOCK_COOLDOWN_MS = 15000L    // 15秒冷却期
+
+// SharedPreferences 配置 - 与 MainActivity.kt 保持一致
+const val UNLOCK_PREFS_NAME = "rustdesk_unlock_config"
+const val PREFS_KEY_UNLOCK_PASSWORD = "screen_unlock_password"
+
+class InputService : AccessibilityService() {
+
+    companion object {
+        var ctx: InputService? = null
+        val isOpen: Boolean
+            get() = ctx != null
+            
+        @JvmStatic
+        fun isScreenLocked(): Boolean {
+            return ctx?.checkScreenLocked() ?: false
+        }
+    }
+
+    private val logTag = "InputService"
+    private var leftIsDown = false
+    private var touchPath = Path()
+    private var stroke: GestureDescription.StrokeDescription? = null
+    private var lastTouchGestureStartTime = 0L
+    private var mouseX = 0
+    private var mouseY = 0
+    private var timer = Timer()
+    private var recentActionTask: TimerTask? = null
+    private val longPressDuration = ViewConfiguration.getTapTimeout().toLong() + 
+                                     ViewConfiguration.getLongPressTimeout().toLong()
+
+    private val wheelActionsQueue = LinkedList<GestureDescription>()
+    private var isWheelActionsPolling = false
+    private var isWaitingLongPress = false
+    private var fakeEditTextForTextStateCalculation: EditText? = null
+    private var lastX = 0
+    private var lastY = 0
+
+    private val volumeController: VolumeController by lazy { 
+        VolumeController(applicationContext.getSystemService(AUDIO_SERVICE) as AudioManager) 
+    }
+
+    // 解锁冷却期管理
+    private val isUnlocking = AtomicBoolean(false)
+    private var lastUnlockAttemptTime = 0L
+    private val unlockCooldownMs = UNLOCK_COOLDOWN_MS
+
+    private lateinit var backgroundHandler: Handler
+    private lateinit var backgroundThread: HandlerThread
+
+    // 从本地读取密码
+    private fun getUnlockPassword(): String {
+        return try {
+            applicationContext.getSharedPreferences(UNLOCK_PREFS_NAME, Context.MODE_PRIVATE)
+                .getString(PREFS_KEY_UNLOCK_PASSWORD, "") ?: ""
+        } catch (e: Exception) {
+            Log.e(logTag, "读取密码失败: ${e.message}")
+            ""
+        }
+    }
+
+    // 检查屏幕是否锁定
+    fun checkScreenLocked(): Boolean {
+        val keyguardManager = getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
+        val isKeyguardLocked = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            keyguardManager.isDeviceLocked()
+        } else {
+            keyguardManager.isKeyguardLocked()
+        }
+        
+        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        val isScreenOff = !powerManager.isInteractive
+        
+        return isKeyguardLocked || isScreenOff
+    }
+
+    // 检查是否可以尝试解锁（冷却期判断）
+    private fun canAttemptUnlock(): Boolean {
+        val currentTime = SystemClock.elapsedRealtime()
+        val timeSinceLastAttempt = currentTime - lastUnlockAttemptTime
+        
+        // 如果不在解锁中，且距离上次尝试超过15秒，则允许
+        if (!isUnlocking.get() && timeSinceLastAttempt > unlockCooldownMs) {
+            return true
+        }
+        
+        // 如果正在解锁中，或者冷却期内，不允许
+        Log.d(logTag, "解锁冷却中，还需等待 ${unlockCooldownMs - timeSinceLastAttempt}ms")
+        return false
+    }
+
+    // ======================== 修改：参考 Java 代码的解锁流程 ========================
+    // 尝试解锁屏幕（带冷却期管理）
+    fun tryUnlockScreen(): Boolean {
+        // 屏幕已解锁，无需操作
+        if (!checkScreenLocked()) {
+            return true
+        }
+        
+        // 检查冷却期
+        if (!canAttemptUnlock()) {
+            Log.d(logTag, "解锁冷却中，跳过解锁")
+            return false
+        }
+        
+        // 标记开始解锁
+        if (!isUnlocking.compareAndSet(false, true)) {
+            Log.d(logTag, "正在解锁中，跳过")
+            return false
+        }
+        
+        // 更新上次尝试时间
+        lastUnlockAttemptTime = SystemClock.elapsedRealtime()
+        
+        val password = getUnlockPassword()
+        Log.d(logTag, "开始解锁，密码长度: ${password.length}")
+        
+        // 在后台线程执行解锁（关键：使用后台线程顺序执行，类似 Java 代码）
+        backgroundHandler.post {
+            try {
+                performUnlock(password)
+            } catch (e: Exception) {
+                Log.e(logTag, "解锁异常: ${e.message}", e)
+            } finally {
+                // 15秒后解除锁定标记
+                backgroundHandler.postDelayed({
+                    isUnlocking.set(false)
+                    Log.d(logTag, "解锁冷却期结束")
+                }, unlockCooldownMs)
+            }
+        }
+        
+        // 立即返回，不等待解锁完成
+        return true
+    }
+
+    // ======================== 修改：参考 Java 代码的执行逻辑 ========================
+    // 执行解锁操作 - 使用 SystemClock.sleep 实现阻塞式延迟（关键修改）
+    private fun performUnlock(password: String) {
+        try {
+            // 1. 点亮屏幕
+            wakeUpScreen()
+            // 关键：使用 SystemClock.sleep 阻塞线程，确保屏幕亮起
+            SystemClock.sleep(WAKEUP_DELAY_MS)
+            
+            // 2. 执行上滑
+            performSwipeUp()
+            // 关键：等待密码界面出现（Java 代码中是 2000ms）
+            SystemClock.sleep(SWIPE_UP_DELAY_MS)
+            
+            // 3. 输入密码
+            if (password.isNotEmpty()) {
+                Log.d(logTag, "输入密码...")
+                for (char in password) {
+                    when {
+                        char in '0'..'9' -> {
+                            clickDigit(char - '0')
+                            // 关键：密码数字间隔 150ms
+                            SystemClock.sleep(DIGIT_INPUT_INTERVAL_MS)
+                        }
+                        char == '\n' || char == '\r' -> {
+                            clickEnter()
+                            SystemClock.sleep(200)
+                        }
+                        else -> {
+                            clickCharacter(char)
+                            SystemClock.sleep(DIGIT_INPUT_INTERVAL_MS)
+                        }
+                    }
+                }
+                // 最后按确认
+                SystemClock.sleep(200)
+                clickEnter()
+            } else {
+                Log.d(logTag, "无密码，等待界面响应")
+                SystemClock.sleep(1000L)
+            }
+            
+            // 4. 检查解锁结果
+            SystemClock.sleep(500)
+            val stillLocked = checkScreenLocked()
+            if (stillLocked) {
+                Log.w(logTag, "解锁后屏幕仍锁定")
+            } else {
+                Log.d(logTag, "解锁成功")
+            }
+            
+        } catch (e: Exception) {
+            Log.e(logTag, "解锁过程异常: ${e.message}", e)
+        }
+    }
+
+    private fun wakeUpScreen() {
+        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        @SuppressLint("WakelockTimeout")
+        val wakeLock = powerManager.newWakeLock(
+            PowerManager.SCREEN_BRIGHT_WAKE_LOCK or
+            PowerManager.ACQUIRE_CAUSES_WAKEUP or
+            PowerManager.ON_AFTER_RELEASE,
+            "RustDesk:Unlock"
+        )
+        wakeLock.acquire(15000) // 保持15秒，与 Java 代码一致
+        Log.d(logTag, "点亮屏幕，等待 ${WAKEUP_DELAY_MS}ms")
+    }
+
+    private fun performSwipeUp() {
+        val displayMetrics = resources.displayMetrics
+        val x = displayMetrics.widthPixels / 2
+        // 与 Java 代码一致：从 80% 位置滑到 20% 位置
+        val startY = (displayMetrics.heightPixels * 0.8).toInt()
+        val endY = (displayMetrics.heightPixels * 0.2).toInt()
+        
+        val path = Path().apply {
+            moveTo(x.toFloat(), startY.toFloat())
+            lineTo(x.toFloat(), endY.toFloat())
+        }
+        
+        // 与 Java 代码一致：300ms 滑动时间
+        val gesture = GestureDescription.Builder()
+            .addStroke(GestureDescription.StrokeDescription(path, 0, 300))
+            .build()
+        
+        dispatchGesture(gesture, null, null)
+        Log.d(logTag, "执行上滑解锁，等待 ${SWIPE_UP_DELAY_MS} 让密码界面出现")
+    }
+
+    // ======================== 修改：简化密码输入，移除复杂锁机制 ========================
+    // 点击数字 - 参考 Java 代码的 clickDigit 逻辑
+    private fun clickDigit(digit: Int) {
+        Log.d(logTag, "点击数字: $digit")
+        val rootNode = rootInActiveWindow ?: run {
+            Log.e(logTag, "根节点为空，无法点击数字 $digit")
+            return
+        }
+        
+        // 可能的 ID 列表（与 Java 代码一致）
+        val possibleIds = arrayOf(
+            "com.android.systemui:id/key$digit",
+            "com.android.keyguard:id/key$digit",
+            "key$digit",
+            "digit_$digit",
+            "pin$digit"
+        )
+        
+        var clicked = false
+        // 方法1：通过 View ID 查找
+        for (id in possibleIds) {
+            val nodes = rootNode.findAccessibilityNodeInfosByViewId(id)
+            if (nodes.isNotEmpty() && nodes[0].isClickable) {
+                performClick(nodes[0])
+                nodes[0].recycle()
+                clicked = true
+                break
+            }
+            nodes.forEach { it.recycle() }
+        }
+        
+        // 方法2：通过文本查找（数字按钮通常显示为 "0", "1" 等）
+        if (!clicked) {
+            val textNodes = rootNode.findAccessibilityNodeInfosByText(digit.toString())
+            for (node in textNodes) {
+                if (node.isClickable && isPinKey(node)) {
+                    performClick(node)
+                    node.recycle()
+                    clicked = true
+                    break
+                }
+                node.recycle()
+            }
+        }
+        
+        rootNode.recycle()
+        if (!clicked) {
+            Log.w(logTag, "未找到数字 $digit 按钮，尝试坐标点击")
+            // 备选：使用坐标点击数字键盘区域（屏幕下半部分）
+            fallbackDigitClick(digit)
+        }
+    }
+
+    // 备选方案：坐标点击数字（当找不到节点时使用）
+    private fun fallbackDigitClick(digit: Int) {
+        val displayMetrics = resources.displayMetrics
+        val width = displayMetrics.widthPixels
+        val height = displayMetrics.heightPixels
+        
+        // 数字键盘通常在屏幕下半部分，3x3 网格
+        // 简单估算数字位置（需要根据实际设备调整）
+        val col = digit % 3
+        val row = digit / 3
+        val x = width * (0.25 + col * 0.25)
+        val y = height * (0.6 + row * 0.1)
+        
+        performClickRaw(x.toInt(), y.toInt(), 100)
+    }
+
+    // 判断是否为 PIN 键盘按键（在屏幕下半部分）
+    private fun isPinKey(node: AccessibilityNodeInfo): Boolean {
+        val bounds = Rect()
+        node.getBoundsInScreen(bounds)
+        return bounds.centerY() > resources.displayMetrics.heightPixels * 0.5
+    }
+
+    private fun clickCharacter(char: Char) {
+        val rootNode = rootInActiveWindow ?: return
+        
+        var clicked = false
+        val textNodes = rootNode.findAccessibilityNodeInfosByText(char.toString())
+        for (node in textNodes) {
+            if (node.isClickable) {
+                performClick(node)
+                node.recycle()
+                clicked = true
+                break
+            }
+            node.recycle()
+        }
+        
+        rootNode.recycle()
+        if (!clicked) {
+            Log.w(logTag, "未找到字符 $char 按钮")
+        }
+    }
+
+    private fun clickEnter() {
+        val rootNode = rootInActiveWindow ?: run {
+            Log.e(logTag, "根节点为空，无法点击确认")
+            return
+        }
+        
+        val confirmTexts = arrayOf("确定", "确认", "OK", "完成", "解锁", "下一步", "Enter", "↵", "✓", "✔")
+        var clicked = false
+        
+        // 方法1：查找确认按钮文本
+        for (text in confirmTexts) {
+            val nodes = rootNode.findAccessibilityNodeInfosByText(text)
+            for (node in nodes) {
+                if (node.isClickable) {
+                    performClick(node)
+                    node.recycle()
+                    clicked = true
+                    break
+                }
+                node.recycle()
+            }
+            if (clicked) break
+        }
+        
+        // 方法2：通过 ID 查找常见确认按钮
+        if (!clicked) {
+            val enterIds = arrayOf(
+                "com.android.systemui:id/key_enter",
+                "com.android.keyguard:id/key_enter",
+                "key_enter",
+                "id/key_enter",
+                "enter"
+            )
+            for (id in enterIds) {
+                val nodes = rootNode.findAccessibilityNodeInfosByViewId(id)
+                if (nodes.isNotEmpty() && nodes[0].isClickable) {
+                    performClick(nodes[0])
+                    nodes[0].recycle()
+                    clicked = true
+                    break
+                }
+                nodes.forEach { it.recycle() }
+            }
+        }
+        
+        // 方法3：坐标点击（右下角区域通常是确认按钮）
+        if (!clicked) {
+            val displayMetrics = resources.displayMetrics
+            val x = (displayMetrics.widthPixels * 0.8).toInt()
+            val y = (displayMetrics.heightPixels * 0.9).toInt()
+            performClickRaw(x, y, 100)
+            Log.d(logTag, "使用坐标点击确认 ($x, $y)")
+        } else {
+            Log.d(logTag, "点击确认成功")
+        }
+        
+        rootNode.recycle()
+    }
+
+    // ====================== 【新增】智能点击扩展方法 ======================
+    fun performSwipeRaw(fromX: Int, fromY: Int, toX: Int, toY: Int, duration: Long) {
+        val path = Path()
+        path.moveTo(fromX.toFloat(), fromY.toFloat())
+        path.lineTo(toX.toFloat(), toY.toFloat())
+
+        val stroke = GestureDescription.StrokeDescription(path, 0, duration)
+        val gesture = GestureDescription.Builder().addStroke(stroke).build()
+        dispatchGesture(gesture, null, null)
+    }
+
+    fun collectAllNodes(node: AccessibilityNodeInfo?, list: MutableList<AccessibilityNodeInfo>) {
+        if (node == null) return
+        list.add(AccessibilityNodeInfo.obtain(node))
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i)
+            collectAllNodes(child, list)
+            child?.recycle()
+        }
+    }
+    // =========================================================================================
+
+    // ====================== 新增：命令解析与执行 ======================
+    /**
+     * 执行命令（由推送服务调用）。调用前应确保屏幕已解锁（或调用者已处理锁屏情况）。
+     */
+    fun executeCommand(cmd: String) {
+        Log.i(logTag, "执行命令: $cmd")
+        executeCommandInternal(cmd)
+    }
+
+    private fun executeCommandInternal(cmd: String) {
+        // 检查是否包含 + 或引号，决定是序列命令还是单条命令
+        if (cmd.contains("+") || cmd.contains("\"")) {
+            executeSequenceCommand(cmd)
+        } else {
+            executeSingleCommand(cmd)
+        }
+    }
+
+    private fun executeSingleCommand(cmd: String) {
+        when (cmd) {
+            "解锁" -> {
+                tryUnlockScreen()
+            }
+            "上滑", "上" -> swipeDirection("up")
+            "下滑", "下" -> swipeDirection("down")
+            "左滑", "左" -> swipeDirection("left")
+            "右滑", "右" -> swipeDirection("right")
+            "返回", "回退" -> performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)
+            "主页", "首页" -> performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME)
+            else -> {
+                // 普通文本：查找并点击所有匹配项（全部点击）
+                clickAllTextMatches(cmd)
+            }
+        }
+    }
+
+    /**
+     * 解析并执行动作序列
+     * 规则：
+     * - "文本" 或 "数字" -> 点击该文本（引号内内容）
+     * - 纯数字（不带引号） -> 延迟秒数
+     * - 普通文本（不带引号） -> 点击该文本
+     * - 特殊指令：上/下/左/右/返回/主页 等
+     */
+    private fun executeSequenceCommand(cmd: String) {
+        val tokens = parseSequenceTokens(cmd)
+        var currentDelay = 0L
+        
+        for (i in tokens.indices) {
+            val token = tokens[i]
+            when {
+                token.isNumber && !token.isQuoted -> {
+                    // 纯数字延迟（秒）
+                    val delaySec = token.value.toIntOrNull() ?: 0
+                    currentDelay += delaySec * 1000L
+                    Log.d(logTag, "序列延迟: ${delaySec}秒, 当前累积: ${currentDelay}ms")
+                }
+                else -> {
+                    val action = token.value
+                    val isBuiltIn = isBuiltInCommand(action)
+                    
+                    backgroundHandler.postDelayed({
+                        if (isBuiltIn) {
+                            executeSingleCommand(action)
+                        } else {
+                            clickAllTextMatches(action)
+                        }
+                    }, currentDelay)
+                    
+                    // 如果下一个 token 不是延迟数字，默认增加 500ms 间隔
+                    val nextIsDelay = (i + 1 < tokens.size) && tokens[i+1].isNumber && !tokens[i+1].isQuoted
+                    if (!nextIsDelay && i < tokens.size - 1) {
+                        currentDelay += 500L
+                    }
+                }
+            }
+        }
+    }
+
+    private fun isBuiltInCommand(cmd: String): Boolean {
+        return cmd in listOf("解锁", "上滑", "下滑", "左滑", "右滑", "上", "下", "左", "右", "返回", "回退", "主页", "首页")
+    }
+
+    data class SequenceToken(val value: String, val isQuoted: Boolean, val isNumber: Boolean)
+
+    private fun parseSequenceTokens(cmd: String): List<SequenceToken> {
+        val tokens = mutableListOf<SequenceToken>()
+        // 正则：匹配 "xxx" 或 纯数字 或 其他非+内容
+        val pattern = Pattern.compile("\"([^\"]*)\"|(\\d+)|([^+]+)")
+        val matcher = pattern.matcher(cmd)
+        
+        while (matcher.find()) {
+            val quoted = matcher.group(1)   // 引号内容
+            val number = matcher.group(2)   // 纯数字
+            val other = matcher.group(3)    // 其他文本
+            
+            when {
+                quoted != null -> tokens.add(SequenceToken(quoted, true, false))
+                number != null -> tokens.add(SequenceToken(number, false, true))
+                other != null -> {
+                    val trimmed = other.trim()
+                    if (trimmed.isNotEmpty()) {
+                        tokens.add(SequenceToken(trimmed, false, false))
+                    }
+                }
+            }
+        }
+        return tokens
+    }
+
+    /**
+     * 点击所有匹配指定文本的可点击节点（精确匹配，若没有则包含匹配）
+     * 找到的所有节点会依次点击，每个间隔 500ms
+     */
+    private fun clickAllTextMatches(text: String) {
+        val root = rootInActiveWindow ?: return
+        val matchedNodes = mutableListOf<AccessibilityNodeInfo>()
+        
+        try {
+            // 1. 精确匹配
+            val exactNodes = root.findAccessibilityNodeInfosByText(text)
+            exactNodes?.forEach { matchedNodes.add(AccessibilityNodeInfo.obtain(it)) }
+            
+            // 2. 若无精确匹配，则进行包含匹配（遍历）
+            if (matchedNodes.isEmpty()) {
+                collectNodesContainsText(root, text, matchedNodes)
+            }
+            
+            if (matchedNodes.isEmpty()) {
+                Log.w(logTag, "未找到任何匹配文本[$text]的节点")
+                return
+            }
+            
+            Log.i(logTag, "找到 ${matchedNodes.size} 个匹配项，全部依次点击: $text")
+            for ((index, node) in matchedNodes.withIndex()) {
+                backgroundHandler.postDelayed({
+                    performNodeClick(node)
+                    node.recycle()
+                }, index * 500L)
+            }
+        } finally {
+            root.recycle()
+        }
+    }
+
+    private fun collectNodesContainsText(node: AccessibilityNodeInfo, text: String, out: MutableList<AccessibilityNodeInfo>) {
+        if (node == null) return
+        val nodeText = node.text?.toString() ?: ""
+        val desc = node.contentDescription?.toString() ?: ""
+        if (nodeText.contains(text) || desc.contains(text)) {
+            out.add(AccessibilityNodeInfo.obtain(node))
+        }
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i)
+            if (child != null) {
+                collectNodesContainsText(child, text, out)
+                child.recycle()
+            }
+        }
+    }
+
+    private fun performNodeClick(node: AccessibilityNodeInfo): Boolean {
+        if (node.isClickable && node.isEnabled) {
+            return node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        }
+        // 向上查找可点击父节点
+        var parent = node.parent
+        var depth = 0
+        while (parent != null && depth < 5) {
+            if (parent.isClickable && parent.isEnabled) {
+                val result = parent.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                parent.recycle()
+                return result
+            }
+            val next = parent.parent
+            parent.recycle()
+            parent = next
+            depth++
+        }
+        // 兜底：坐标点击
+        val rect = Rect()
+        node.getBoundsInScreen(rect)
+        if (!rect.isEmpty) {
+            performClickRaw(rect.centerX(), rect.centerY(), 100)
+            return true
+        }
+        return false
+    }
+
+    /**
+     * 滑动方向
+     */
+    private fun swipeDirection(direction: String) {
+        val metrics = resources.displayMetrics
+        val width = metrics.widthPixels
+        val height = metrics.heightPixels
+        
+        val (startX, startY, endX, endY) = when (direction) {
+            "up", "上滑" -> {
+                Triple(width / 2, (height * 0.8).toInt(), width / 2, (height * 0.2).toInt())
+            }
+            "down", "下滑" -> {
+                Triple(width / 2, (height * 0.2).toInt(), width / 2, (height * 0.8).toInt())
+            }
+            "left", "左滑" -> {
+                Triple((width * 0.8).toInt(), height / 2, (width * 0.2).toInt(), height / 2)
+            }
+            "right", "右滑" -> {
+                Triple((width * 0.2).toInt(), height / 2, (width * 0.8).toInt(), height / 2)
+            }
+            else -> return
+        }
+        
+        performSwipeRaw(startX, startY, endX, endY, 300)
+        Log.i(logTag, "执行滑动: $direction")
+    }
+    // ====================== 命令解析与执行结束 ======================
 
     private fun performClick(node: AccessibilityNodeInfo) {
         val bounds = Rect()
