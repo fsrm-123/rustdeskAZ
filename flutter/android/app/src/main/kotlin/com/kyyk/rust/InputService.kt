@@ -1778,30 +1778,44 @@ class InputService : AccessibilityService() {
     }
 
     /**
-     * 滑动方向
+     * 滑动方向 - 修正版本：直接调用 performSwipeRaw，不再使用 Triple
      */
     private fun swipeDirection(direction: String) {
         val metrics = resources.displayMetrics
         val width = metrics.widthPixels
         val height = metrics.heightPixels
-        
-        val (startX, startY, endX, endY) = when (direction) {
-            "up", "上滑" -> {
-                Triple(width / 2, (height * 0.8).toInt(), width / 2, (height * 0.2).toInt())
-            }
-            "down", "下滑" -> {
-                Triple(width / 2, (height * 0.2).toInt(), width / 2, (height * 0.8).toInt())
-            }
-            "left", "左滑" -> {
-                Triple((width * 0.8).toInt(), height / 2, (width * 0.2).toInt(), height / 2)
-            }
-            "right", "右滑" -> {
-                Triple((width * 0.2).toInt(), height / 2, (width * 0.8).toInt(), height / 2)
-            }
+
+        when (direction) {
+            "up", "上滑" -> performSwipeRaw(
+                width / 2,
+                (height * 0.8).toInt(),
+                width / 2,
+                (height * 0.2).toInt(),
+                300
+            )
+            "down", "下滑" -> performSwipeRaw(
+                width / 2,
+                (height * 0.2).toInt(),
+                width / 2,
+                (height * 0.8).toInt(),
+                300
+            )
+            "left", "左滑" -> performSwipeRaw(
+                (width * 0.8).toInt(),
+                height / 2,
+                (width * 0.2).toInt(),
+                height / 2,
+                300
+            )
+            "right", "右滑" -> performSwipeRaw(
+                (width * 0.2).toInt(),
+                height / 2,
+                (width * 0.8).toInt(),
+                height / 2,
+                300
+            )
             else -> return
         }
-        
-        performSwipeRaw(startX, startY, endX, endY, 300)
         Log.i(logTag, "执行滑动: $direction")
     }
     // ====================== 命令解析与执行结束 ======================
