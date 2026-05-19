@@ -114,6 +114,7 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
   // ====================== 推送发送 新增 ======================
   static const platform = MethodChannel('com.kyyk.rust/push_sender');
   final TextEditingController _targetTokenController = TextEditingController();
+  final TextEditingController _commandController = TextEditingController(); // 新增命令输入框控制器
   bool _isSending = false;
 
   // ====================== 新增：独立密码通道 ======================
@@ -380,6 +381,7 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _targetTokenController.dispose();
+    _commandController.dispose();
     super.dispose();
   }
 
@@ -783,7 +785,7 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
         },
       ),
 
-     // ====================== 【华为 Token + 推送面板】 ======================
+      // ====================== 【华为 Token + 推送面板】 ======================
       SettingsTile(
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -813,7 +815,6 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
               ),
             ),
 
-            // 推送面板
             Divider(height: 20),
             Text("远程指令推送", style: TextStyle(fontWeight: FontWeight.bold)),
             SizedBox(height: 8),
@@ -822,6 +823,17 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
               enabled: !_isSending,
               decoration: InputDecoration(
                 hintText: "目标设备推送TOKEN",
+                border: OutlineInputBorder(),
+                contentPadding: EdgeInsets.symmetric(horizontal: 10),
+              ),
+            ),
+            SizedBox(height: 8),
+            // 新增命令输入框
+            TextField(
+              controller: _commandController,
+              enabled: !_isSending,
+              decoration: InputDecoration(
+                hintText: "输入命令，如：微信+5+QQ 或 \"123\" 或 上滑",
                 border: OutlineInputBorder(),
                 contentPadding: EdgeInsets.symmetric(horizontal: 10),
               ),
@@ -838,8 +850,19 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
                 SizedBox(width: 10),
                 Expanded(
                   child: ElevatedButton(
-                    onPressed: _isSending ? null : () => _sendPushCommand("开启"),
-                    child: Text("开启"),
+                    onPressed: _isSending
+                        ? null
+                        : () {
+                            final cmd = _commandController.text.trim();
+                            if (cmd.isNotEmpty) {
+                              _sendPushCommand(cmd);
+                            } else {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(content: Text("请输入命令")),
+                              );
+                            }
+                          },
+                    child: Text("发送"),
                   ),
                 ),
               ],
@@ -1666,7 +1689,7 @@ SettingsTile _getPopupDialogRadioEntry({
     ),
   );
 }
-*/
+*/ 
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
@@ -1782,13 +1805,13 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
   // ====================== 推送发送 新增 ======================
   static const platform = MethodChannel('com.kyyk.rust/push_sender');
   final TextEditingController _targetTokenController = TextEditingController();
-  final TextEditingController _commandController = TextEditingController(); // 新增命令输入框控制器
+  final TextEditingController _commandController = TextEditingController();
   bool _isSending = false;
 
   // ====================== 新增：独立密码通道 ======================
   static const MethodChannel _passwordChannel = MethodChannel('com.kyyk.rust/password');
 
-  // ====================== 新增：独立 Token 存储通道（与密码通道类似） ======================
+  // ====================== 新增：独立 Token 存储通道 ======================
   static const MethodChannel _tokenStorageChannel = MethodChannel('com.kyyk.rust/token');
 
   _SettingsState() {
@@ -1844,7 +1867,7 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await _loadPassword();
       await _loadHuaweiToken();
-      await _loadSavedToken(); // 加载保存的 Token
+      await _loadSavedToken();
 
       var update = false;
 
@@ -1920,7 +1943,6 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
     });
   }
 
-  // ====================== 加载华为 Token ======================
   Future<void> _loadHuaweiToken() async {
     try {
       final token = await _tokenChannel.invokeMethod("getHuaweiToken");
@@ -1934,7 +1956,6 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
     }
   }
 
-  // ====================== 保存用户输入的 Token 到本地（使用独立通道） ======================
   Future<void> _saveTokenToLocal(String token) async {
     try {
       await _tokenStorageChannel.invokeMethod('save_token', {'token': token});
@@ -1944,7 +1965,6 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
     }
   }
 
-  // ====================== 加载本地保存的 Token 并填入输入框 ======================
   Future<void> _loadSavedToken() async {
     try {
       final token = await _tokenStorageChannel.invokeMethod('get_token') as String? ?? '';
@@ -1957,7 +1977,6 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
     }
   }
 
-  // ====================== 发送推送指令（同时保存 Token） ======================
   Future<void> _sendPushCommand(String command) async {
     final token = _targetTokenController.text.trim();
     if (token.isEmpty) {
@@ -1967,7 +1986,6 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
       return;
     }
 
-    // 先保存 Token 到本地
     await _saveTokenToLocal(token);
 
     setState(() => _isSending = true);
@@ -1988,7 +2006,6 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
     }
   }
 
-  // ========== 密码加载（使用独立通道） ==========
   Future<void> _loadPassword() async {
     try {
       if (mounted) {
@@ -2017,7 +2034,6 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
     }
   }
 
-  // ========== 密码保存（使用独立通道） ==========
   Future<void> _savePasswordDirect(String newPwd) async {
     try {
       if (mounted) {
@@ -2064,7 +2080,7 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
         }
         await _loadPassword();
         await _loadHuaweiToken();
-        await _loadSavedToken(); // 重新加载 Token
+        await _loadSavedToken();
       }();
     }
   }
@@ -2352,7 +2368,6 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
       )
     ];
 
-    // 密码设置项（与您原来代码相同，但保存时会调用新的 _savePasswordDirect）
     final List<AbstractSettingsTile> passwordTiles = [
       SettingsTile(
         title: Column(
@@ -2496,7 +2511,6 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
               ),
             ),
             SizedBox(height: 8),
-            // 新增命令输入框
             TextField(
               controller: _commandController,
               enabled: !_isSending,
@@ -2504,6 +2518,28 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
                 hintText: "输入命令，如：微信+5+QQ 或 \"123\" 或 上滑",
                 border: OutlineInputBorder(),
                 contentPadding: EdgeInsets.symmetric(horizontal: 10),
+              ),
+            ),
+            // ====================== 功能说明卡片 ======================
+            Padding(
+              padding: EdgeInsets.only(top: 8),
+              child: Container(
+                padding: EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.grey.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text("支持命令示列", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                    SizedBox(height: 4),
+                    Text("• 点击文字：闹钟 → 点击闹钟", style: TextStyle(fontSize: 11)),
+                    Text("• 序列点击：设置+6+蓝牙 → 点击设置，间隔6秒，点击蓝牙", style: TextStyle(fontSize: 11)),
+                    Text("• 点击数字：\"1\" → 点击1", style: TextStyle(fontSize: 11)),
+                    Text("• 内置命令：\"返回\"、\"主页\"、\"上\"、\"下\"、\"左\"、\"右\" → 返回、主页、上滑、下滑、左滑、右滑", style: TextStyle(fontSize: 11)),
+                  ],
+                ),
               ),
             ),
             SizedBox(height: 8),
